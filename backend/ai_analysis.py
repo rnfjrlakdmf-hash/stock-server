@@ -346,9 +346,9 @@ def analyze_supply_chain(symbol: str) -> Dict[str, Any]:
     """
     특정 기업의 공급망(Supply Chain) 및 경쟁 관계를 분석하여
     상관관계 맵(Graph Data)을 생성합니다.
-    (API Quota 절약을 위해 비활성화 - 정적 데이터 반환)
     """
-    return {
+    if not API_KEY:
+        return {
         "symbol": symbol,
         "nodes": [
             {"id": symbol, "group": "target", "label": symbol},
@@ -361,23 +361,99 @@ def analyze_supply_chain(symbol: str) -> Dict[str, Any]:
             {"source": symbol, "target": "Customer", "value": "Sales"},
             {"source": symbol, "target": "Competitor", "value": "Compete"}
         ],
-        "summary": "현재 API 사용량 제한으로 인해 공급망 분석이 비활성화되었습니다."
+        "summary": "API 키 미설정으로 인한 데모 데이터입니다."
     }
+
+    model = get_json_model()
+    
+    prompt = f"""
+    Analyze the Global Supply Chain and Value Chain for {symbol}.
+
+    Instructions:
+    1. Identify key 'Suppliers' (Tier 1/2), 'Customers' (Major Clients), and 'Competitors'.
+    2. Define relationships (Supply, Sales, Compete).
+    3. Output graph data compatible with network visualization.
+    4. Provide a 'Supply Chain Summary' in Korean.
+
+    Response Format (JSON):
+    {{
+        "symbol": "{symbol}",
+        "nodes": [
+            {{"id": "{symbol}", "group": "target", "label": "{symbol}"}},
+            {{"id": "TSMC", "group": "supplier", "label": "TSMC"}},
+            {{"id": "Apple", "group": "customer", "label": "Apple"}},
+            {{"id": "AMD", "group": "competitor", "label": "AMD"}}
+        ],
+        "links": [
+            {{"source": "TSMC", "target": "{symbol}", "value": "Foundry"}},
+            {{"source": "{symbol}", "target": "Apple", "value": "GPU Sales"}},
+            {{"source": "{symbol}", "target": "AMD", "value": "Competition"}}
+        ],
+        "summary": "Korean summary of the supply chain risks and structure..."
+    }}
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"Supply Chain Analysis Error: {e}")
+        return None
 
 def analyze_chart_patterns(symbol: str) -> Dict[str, Any]:
     """
     주가 데이터를 기반으로 차트 패턴(헤드앤숄더, 이중바닥 등)과 
     지지/저항선을 AI가 분석합니다.
-    (API Quota 절약을 위해 비활성화 - 정적 데이터 반환)
     """
-    return {
-        "pattern": "Uptrend (Provisional)",
-        "signal": "Hold",
-        "confidence": 50,
-        "support": 0,
-        "resistance": 0,
-        "summary": "현재 API 사용량 제한으로 인해 정밀 차트 분석이 일시 중단되었습니다."
-    }
+    if not API_KEY:
+        return {
+            "pattern": "Uptrend (Provisional)",
+            "signal": "Hold",
+            "confidence": 50,
+            "support": 0,
+            "resistance": 0,
+            "summary": "API 키 미설정"
+        }
+
+    # 간단한 가격 데이터 가져오기 (문맥 제공용)
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(symbol).history(period="3mo")
+        closes = hist['Close'].tolist()[-20:] # 최근 20일 데이터만
+        price_str = str(closes)
+    except:
+        price_str = "Data unavailable"
+
+    model = get_json_model()
+    
+    prompt = f"""
+    Analyze the technical chart patterns for {symbol} based on recent price action trends (Conceptually).
+    Recent 20 days closing prices: {price_str}
+
+    Instructions:
+    1. Identify the dominant 'Chart Pattern' (e.g., Double Bottom, Head & Shoulders, Bull Flag, Uptrend).
+    2. Determine key 'Support' and 'Resistance' levels (Approximation).
+    3. Give a 'Trading Signal' (Buy / Sell / Hold).
+    4. Provide a 'Confidence Score' (0-100).
+    5. Write a short 'Technical Analysis' in Korean.
+
+    Response Format (JSON):
+    {{
+        "pattern": "Bull Flag",
+        "signal": "Buy",
+        "confidence": 85,
+        "support": 150.5,
+        "resistance": 175.0,
+        "summary": "Korean technical summary..."
+    }}
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"Chart Analysis Error: {e}")
+        return None
 
 def analyze_trading_log(log_text: str) -> Dict[str, Any]:
     """
@@ -501,20 +577,47 @@ def check_sniper_alert(symbol: str, condition_type: str) -> Dict[str, Any]:
 def track_insider_trading(symbol: str) -> Dict[str, Any]:
     """
     특정 기업의 내부자 거래(Insider Trading) 내역을 추적하고 분석합니다.
-    (API Quota 절약을 위해 비활성화 - 정적 데이터 반환)
     """
-    return {
-        "transactions": [],
-        "sentiment": "Neutral",
-        "score": 50,
-        "summary": "API 사용량 최적화를 위해 내부자 거래 시뮬레이션을 비활성화했습니다."
-    }
+    # 실제 데이터는 stock_data.get_insider_trading 에서 가져오지만, 
+    # 여기서는 그 의미를 해석하는 AI 기능을 수행
+    if not API_KEY:
+        return {
+            "transactions": [],
+            "sentiment": "Neutral",
+            "score": 50,
+            "summary": "API 키 미설정"
+        }
+        
+    model = get_json_model()
+    
+    prompt = f"""
+    Analyze the implication of 'Insider Trading' for a stock {symbol}.
+    (Assume hypothetical recent insider buying/selling if no data provided, or genreal sentiment).
+    
+    Instructions:
+    1. Determine 'Insider Sentiment' (Bullish/Bearish).
+    2. Give a 'Insider Signal Score' (0-100).
+    3. Provide a 'Summary' in Korean explains what insiders are doing.
+
+    Response Format (JSON):
+    {{
+        "sentiment": "Bullish",
+        "score": 80,
+        "summary": "Korean summary..."
+    }}
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"Insider Analysis Error: {e}")
+        return None
 
 def analyze_market_weather() -> Dict[str, Any]:
     """
     시장 주요 지표(VIX, S&P500, 환율, 금리 등)를 종합하여
     '오늘의 증시 날씨'를 결정하고 해설을 제공합니다.
-    (API Quota 절약을 위해 비활성화 - 간단 로직으로 대체)
     """
     # 데이터 수집 (yfinance)
     try:
@@ -530,26 +633,68 @@ def analyze_market_weather() -> Dict[str, Any]:
         sp500_change = 0
         vix = 20
         
-    # 간단한 규칙 기반 날씨 결정
-    weather = "Cloudy"
-    icon = "Cloud"
-    if sp500_change > 0.5 and vix < 20:
-        weather = "Sunny"
-        icon = "Sun"
-    elif sp500_change < -0.5 or vix > 25:
-        weather = "Rainy"
-        icon = "Rain"
-        
-    return {
-        "weather": weather,
-        "icon": icon,
-        "temperature": 50 + (sp500_change * 10),
-        "summary": "AI API 절약 모드 작동 중입니다. (지수 기반 자동 계산)",
-        "details": {
-            "vix": round(float(vix), 2),
-            "sp500_change": round(float(sp500_change), 2)
+    if not API_KEY:
+        # 간단한 규칙 기반 날씨 결정 (API 없을 때)
+        weather = "Cloudy"
+        icon = "Cloud"
+        if sp500_change > 0.5 and vix < 20:
+            weather = "Sunny"
+            icon = "Sun"
+        elif sp500_change < -0.5 or vix > 25:
+            weather = "Rainy"
+            icon = "Rain"
+            
+        return {
+            "weather": weather,
+            "icon": icon,
+            "temperature": 50 + (sp500_change * 10),
+            "summary": "AI API 절약 모드 작동 중 (규칙 기반)",
+            "details": {
+                "vix": round(float(vix), 2),
+                "sp500_change": round(float(sp500_change), 2)
+            }
         }
-    }
+        
+    # API 사용
+    model = get_json_model()
+    
+    prompt = f"""
+    You are a 'Market Weather Caster'.
+    Current Market Data:
+    - S&P 500 Daily Change: {sp500_change:.2f}%
+    - VIX (Fear Index): {vix:.2f}
+    
+    Instructions:
+    1. Decide the 'Market Weather' (Sunny / Cloudy / Rainy / Stormy).
+    2. Choose an 'Icon' (Sun / Cloud / Rain / Lightning).
+    3. Calculate 'Market Temperature' (0-100, Hot is Bullish, Cold is Bearish).
+    4. Write a witty 'Weather Forecast' in Korean.
+    
+    Response Format (JSON):
+    {{
+        "weather": "Sunny",
+        "icon": "Sun",
+        "temperature": 80,
+        "summary": "Korean weather forecast...",
+        "details": {{
+            "vix": {vix},
+            "sp500_change": {sp500_change}
+        }}
+    }}
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return json.loads(response.text)
+    except Exception as e:
+         # 에러 시 fallback
+        return {
+            "weather": "Cloudy", 
+            "icon": "Cloud", 
+            "temperature": 50, 
+            "summary": "API 호출 실패, 흐림.",
+             "details": { "vix": vix, "sp500_change": sp500_change }
+        }
 
 def calculate_delisting_risk(symbol: str) -> Dict[str, Any]:
     """
