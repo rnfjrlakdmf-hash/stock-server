@@ -3,6 +3,9 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Search, Bell, User, BarChart2, ShieldAlert, Sparkles, LineChart, UserCheck, Users } from "lucide-react";
+import { useEffect, useRef } from 'react';
+import { API_BASE_URL } from "@/lib/config";
+import { useAuth } from "@/context/AuthContext";
 
 interface HeaderProps {
     title?: string;
@@ -12,12 +15,72 @@ interface HeaderProps {
 
 export default function Header({ title = "대시보드", subtitle = "환영합니다, 투자자님", onSearch }: HeaderProps) {
     const pathname = usePathname();
+    const { user } = useAuth();
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && onSearch) {
             onSearch(e.currentTarget.value);
         }
     };
+
+    // [New] Real-time Alert Polling
+    useEffect(() => {
+        const checkAlerts = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/alerts`);
+                const json = await res.json();
+                if (json.status === "success") {
+                    const triggered = json.data.filter((a: any) => a.status === "triggered");
+
+                    // Check local storage to see if we already notified this specific trigger
+                    // Trigger ID usually is timestamp, but triggered_at is better unique key for the event
+                    const lastSeen = JSON.parse(localStorage.getItem("seenAlerts") || "[]");
+                    const newTriggers = triggered.filter((a: any) => !lastSeen.includes(a.id + "_" + a.triggered_at));
+
+                    if (newTriggers.length > 0) {
+                        // Play Alert Sound
+                        try {
+                            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                            const osc = ctx.createOscillator();
+                            const gain = ctx.createGain();
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+
+                            // Ding-Dong effect
+                            osc.frequency.setValueAtTime(880, ctx.currentTime); // High
+                            osc.frequency.exponentialRampToValueAtTime(500, ctx.currentTime + 0.5); // Low
+                            gain.gain.setValueAtTime(0.5, ctx.currentTime);
+                            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+
+                            osc.start();
+                            osc.stop(ctx.currentTime + 0.6);
+                        } catch (e) {
+                            console.error("Audio block", e);
+                        }
+
+                        // Browser Notification (Toast style via window.alert for now, simplest to force attention)
+                        // In a real app we would use a Toast component, but alert() is effective for forcing user to see it.
+                        // Or we can just log it if we want to be less intrusive, but user asked for ALERTS.
+
+                        // Let's use simple alert for v1
+                        const msg = `🚨 [가격 알림] ${newTriggers[0].symbol} 목표가 도달!\n현재가: ${newTriggers[0].triggered_price}\n목표가: ${newTriggers[0].target_price}`;
+                        // We use setTimeout to let UI render/sound play before blocking with alert
+                        setTimeout(() => alert(msg), 100);
+
+                        // Mark as seen
+                        const updatedSeen = [...lastSeen, ...newTriggers.map((a: any) => a.id + "_" + a.triggered_at)];
+                        localStorage.setItem("seenAlerts", JSON.stringify(updatedSeen));
+                    }
+                }
+            } catch (e) {
+                // Ignore fetch errors
+            }
+        };
+
+        const interval = setInterval(checkAlerts, 10000); // Check every 10s
+        checkAlerts(); // Run immediately on mount
+        return () => clearInterval(interval);
+    }, []);
 
     return (
         <header className="flex flex-col md:flex-row items-center justify-between p-6 border-b border-white/5 bg-black/40 backdrop-blur-md sticky top-0 z-50 transition-all duration-200">
@@ -29,30 +92,7 @@ export default function Header({ title = "대시보드", subtitle = "환영합�
                     <p className="text-xs text-gray-400 font-mono tracking-widest uppercase">AI Stock Analyst</p>
                 </div>
 
-                {/* Navigation Links - Scrollable on Desktop/Tablet */}
-                <nav className="hidden md:flex items-center gap-6 text-sm font-medium ml-4 overflow-x-auto no-scrollbar mask-linear-fade max-w-[60vw] whitespace-nowrap pr-4">
-                    <Link href="/" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <Sparkles className="w-4 h-4" /> 대시보드
-                    </Link>
-                    <Link href="/discovery" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/discovery' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <BarChart2 className="w-4 h-4" /> 종목 발굴
-                    </Link>
-                    <Link href="/chat" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/chat' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <Users className="w-4 h-4" /> 챗봇 상담
-                    </Link>
-                    <Link href="/portfolio" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/portfolio' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <ShieldAlert className="w-4 h-4" /> 포트폴리오
-                    </Link>
-                    <Link href="/theme" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/theme' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <Sparkles className="w-4 h-4 text-yellow-400" /> 이슈 테마 <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-1.5 py-0.5 rounded ml-0.5">HOT</span>
-                    </Link>
-                    <Link href="/pattern" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/pattern' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <LineChart className="w-4 h-4 text-emerald-500" /> 차트 분석
-                    </Link>
-                    <Link href="/coach" className={`hover:text-white transition-colors flex items-center gap-1.5 ${pathname === '/coach' ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        <UserCheck className="w-4 h-4 text-orange-500" /> AI 코치
-                    </Link>
-                </nav>
+                {/* Navigation moved to Sidebar */}
             </div>
 
             <div className="flex items-center gap-4 w-full md:w-auto">
@@ -72,10 +112,29 @@ export default function Header({ title = "대시보드", subtitle = "환영합�
                         <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-red-500 animate-pulse ring-2 ring-black" />
                     </button>
                     <button className="rounded-xl border border-white/5 bg-white/5 p-1 flex items-center gap-2 pr-3 hover:bg-white/10 transition-colors">
-                        <div className="rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 p-1.5">
-                            <User className="h-4 w-4 text-white" />
-                        </div>
-                        <span className="text-sm font-medium text-gray-300 hidden md:block">투자자</span>
+                        {user ? (
+                            <>
+                                {user.picture ? (
+                                    <img
+                                        src={user.picture}
+                                        alt={user.name}
+                                        className="h-8 w-8 rounded-lg object-cover border border-white/10"
+                                    />
+                                ) : (
+                                    <div className="rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 p-1.5">
+                                        <User className="h-4 w-4 text-white" />
+                                    </div>
+                                )}
+                                <span className="text-sm font-medium text-gray-300 hidden md:block">{user.name}</span>
+                            </>
+                        ) : (
+                            <>
+                                <div className="rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 p-1.5">
+                                    <User className="h-4 w-4 text-white" />
+                                </div>
+                                <span className="text-sm font-medium text-gray-300 hidden md:block">투자자</span>
+                            </>
+                        )}
                     </button>
                 </div>
             </div>

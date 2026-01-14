@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { API_BASE_URL } from "@/lib/config";
 import { Search, Loader2, ArrowRight, TrendingUp, AlertTriangle, Layers } from "lucide-react";
 
 export default function ThemePage() {
+    const router = useRouter();
     const [keyword, setKeyword] = useState("");
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<any>(null);
@@ -128,7 +130,10 @@ export default function ThemePage() {
                                 </h4>
                                 <div className="space-y-4">
                                     {result.leaders.map((stock: any, i: number) => (
-                                        <div key={i} className="flex gap-4 p-4 rounded-xl bg-black/40 border border-white/5 hover:border-red-500/30 transition-colors">
+                                        <div key={i}
+                                            onClick={() => router.push(`/discovery?q=${stock.symbol}`)}
+                                            className="flex gap-4 p-4 rounded-xl bg-black/40 border border-white/5 hover:border-red-500/30 transition-colors cursor-pointer"
+                                        >
                                             <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center font-bold text-red-400">
                                                 {i + 1}
                                             </div>
@@ -148,7 +153,10 @@ export default function ThemePage() {
                                 </h4>
                                 <div className="space-y-4">
                                     {result.followers.map((stock: any, i: number) => (
-                                        <div key={i} className="flex gap-4 p-4 rounded-xl bg-black/40 border border-white/5 hover:border-blue-500/30 transition-colors">
+                                        <div key={i}
+                                            onClick={() => router.push(`/discovery?q=${stock.symbol}`)}
+                                            className="flex gap-4 p-4 rounded-xl bg-black/40 border border-white/5 hover:border-blue-500/30 transition-colors cursor-pointer"
+                                        >
                                             <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center font-bold text-blue-400">
                                                 {i + 1}
                                             </div>

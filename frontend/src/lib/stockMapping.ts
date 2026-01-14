@@ -36,6 +36,8 @@ export const STOCK_KOREAN_MAP: Record<string, string> = {
     "삼성전자": "005930.KS",
     "삼전": "005930.KS",
     "에스케이하이닉스": "000660.KS",
+    "SK하이닉스": "000660.KS",
+    "sk하이닉스": "000660.KS",
     "하이닉스": "000660.KS",
     "엘지에너지솔루션": "373220.KS",
     "엘지엔솔": "373220.KS",
@@ -61,6 +63,7 @@ export const STOCK_KOREAN_MAP: Record<string, string> = {
     "알테오젠": "196170.KQ",
     "펄어비스": "263750.KQ",
     "셀트리온헬스케어": "091990.KQ",
+    "대덕전자": "353200.KS",
 
     // 추가 매핑
     "현대": "005380.KS",
@@ -78,10 +81,17 @@ export const STOCK_KOREAN_MAP: Record<string, string> = {
     "엔씨": "036570.KS",
     "크래프톤": "259960.KS",
     "하이브": "352820.KS",
-    "와이지엔터테인먼트": "122870.KQ",
     "와이지": "122870.KQ",
     "제이와이피": "035900.KQ",
-    "에스엠": "041510.KQ"
+    "에스엠": "041510.KQ",
+
+    // Market & News Mapping
+    "증시": "^MARKET",
+    "시장": "^MARKET",
+    "뉴스": "^MARKET",
+    "market": "^MARKET",
+    "news": "^MARKET",
+    "주식시장": "^MARKET"
 };
 
 export function getTickerFromKorean(term: string): string {

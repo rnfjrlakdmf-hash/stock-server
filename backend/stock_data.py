@@ -2,97 +2,360 @@ import yfinance as yf
 import pandas as pd
 from GoogleNews import GoogleNews
 import datetime
+import re
+
+from korea_data import get_korean_name, get_naver_flash_news
+
+import concurrent.futures
+
+# [Cache] Memory Cache for Static Data
+NAME_CACHE = {}
+
+def get_daily_prices_data(ticker):
+    """Helper to fetch and process daily prices (history) in a separate thread"""
+    daily_prices = []
+    try:
+        # Fetch slightly more data to calculate changes
+        hist_asc = ticker.history(period="3mo")
+        if hist_asc.empty:
+            return []
+            
+        # Calculate daily change
+        hist_asc['PrevClose'] = hist_asc['Close'].shift(1)
+        hist_asc['Change'] = ((hist_asc['Close'] - hist_asc['PrevClose']) / hist_asc['PrevClose']) * 100
+        
+        # Sort desc and take top 20
+        hist_desc = hist_asc.sort_index(ascending=False).head(20)
+        
+        for date, row in hist_desc.iterrows():
+            if pd.isna(row['Close']): continue
+            daily_prices.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "open": float(row['Open']),
+                "high": float(row['High']),
+                "low": float(row['Low']),
+                "close": float(row['Close']),
+                "volume": int(row['Volume']),
+                "change": float(row['Change']) if pd.notna(row['Change']) else 0.0
+            })
+        return daily_prices
+    except Exception as e:
+        print(f"History fetch error: {e}")
+        return []
+
+def fetch_basic_quote(symbol):
+    """
+    Fastest possible check for price using fast_info.
+    Returns dict with essential data and the ticker object.
+    """
+    try:
+        t = yf.Ticker(symbol)
+        # Trigger fast_info access
+        price = t.fast_info.last_price
+        if price and price > 0:
+            return {
+                "symbol": symbol,
+                "price": price,
+                "prev_close": t.fast_info.previous_close,
+                "currency": t.fast_info.currency,
+                "market_cap": t.fast_info.market_cap,
+                "ticker": t
+            }
+    except:
+        pass
+    return None
+
+def fetch_full_info(ticker):
+    """
+    Fetches the heavy 'info' property.
+    """
+    try:
+        return ticker.info
+    except:
+        return {}
 
 def get_stock_info(symbol: str):
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        
-        # 기본 정보 추출 (fast_info 우선 사용)
+    # [New] 증시/뉴스 검색 시 시장 전반 데이터 반환
+    if symbol == "^MARKET":
         try:
-            current_price = ticker.fast_info.last_price
-            previous_close = ticker.fast_info.previous_close
-        except:
-             # fast_info 실패 시 info 사용
-            current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
-            previous_close = info.get('previousClose', info.get('regularMarketPreviousClose', 0))
+            sp500 = yf.Ticker("^GSPC")
+            try:
+                price = sp500.fast_info.last_price
+                prev = sp500.fast_info.previous_close
+            except:
+                hist = sp500.history(period="2d")
+                price = hist['Close'].iloc[-1]
+                prev = hist['Close'].iloc[-2]
+
+            change_percent = ((price - prev) / prev) * 100
+            change_str = f"{change_percent:+.2f}%"
+            
+            raw_news = get_market_news()
+            formatted_news = []
+            for n in raw_news:
+                formatted_news.append({
+                    "title": n['title'], "publisher": n['source'], "link": n['link'], "published": n['time']
+                })
+
+            return {
+                "name": "글로벌 증시 & 주요 뉴스", "symbol": "MARKET",
+                "price": f"{price:,.2f}", "currency": "USD (S&P500)", "change": change_str,
+                "summary": "현재 시장의 주요 지수 흐름과 최신 경제 뉴스를 종합하여 보여줍니다.",
+                "sector": "지수/시장 (Market Index)",
+                "financials": {}, "news": formatted_news, "score": 50,
+                "metrics": { "supplyDemand": 50, "financials": 50, "news": 50 }
+            }
+        except Exception as e:
+            print(f"Error fetching market info: {e}")
+            return None
+
+    # [Aggressive Parallel Execution]
+    # We use more workers to race KS/KQ and fetch details simultaneously
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+    
+    try:
+        symbol = symbol.strip()
+        
+        # 1. Race / Identify Ticker
+        # If 6 digits, launch both KS and KQ checks in parallel ("Happy Eyeballs")
+        # If explicit, launch single check
+        
+        candidates = []
+        if re.match(r'^\d{6}$', symbol):
+            candidates = [f"{symbol}.KS", f"{symbol}.KQ"]
+        else:
+            candidates = [symbol]
+
+        quote_futures = {executor.submit(fetch_basic_quote, s): s for s in candidates}
+        
+        winner_data = None
+        
+        # Wait up to 2 seconds for a winner
+        done, _ = concurrent.futures.wait(quote_futures.keys(), timeout=2.0, return_when=concurrent.futures.ALL_COMPLETED)
+        
+        # Logic to pick winner: Prefer KS if both valid, otherwise first valid
+        results_map = {}
+        for f in done:
+            try:
+                res = f.result()
+                if res:
+                    results_map[res['symbol']] = res
+            except:
+                pass
+        
+        if len(candidates) > 1:
+            # Check KS first
+            if candidates[0] in results_map:
+                winner_data = results_map[candidates[0]]
+            elif candidates[1] in results_map:
+                winner_data = results_map[candidates[1]]
+        elif len(candidates) == 1:
+            if candidates[0] in results_map:
+                winner_data = results_map[candidates[0]]
+
+        # If no valid ticker found via fast check
+        if not winner_data:
+            # Check if it was an explicit valid format that just failed fast_info (rare)
+            # Or try Theme Search
+            if not symbol.endswith(('.KS', '.KQ', '.F', '-USD')):
+                 print(f"Ticker '{symbol}' not found. Attempting Theme Search...")
+                 from ai_analysis import analyze_theme
+                 theme_result = analyze_theme(symbol)
+                 if theme_result:
+                     return {
+                        "name": f"테마: {theme_result.get('theme')}",
+                        "symbol": "THEME",
+                        "price": "N/A", "currency": "KRW", "change": "N/A",
+                        "summary": theme_result.get('description', 'AI 테마 분석 결과입니다.'),
+                        "sector": "Theme / Sector",
+                        "financials": {}, "news": [], "score": 0,
+                        "metrics": { "supplyDemand": 50, "financials": 50, "news": 50 },
+                        "theme_data": theme_result 
+                     }
+            return None # Give up
+
+        # 2. Winner Found! Launch Details Fetch
+        # winner_data has: symbol, price, prev_close, currency, market_cap, ticker
+        target_symbol = winner_data['symbol']
+        ticker = winner_data['ticker']
+        
+        # Sub-tasks
+        f_info = executor.submit(fetch_full_info, ticker)  # Slowest
+        f_hist = executor.submit(get_daily_prices_data, ticker) # Medium
+        
+        f_name = None
+        if target_symbol.endswith('.KS') or target_symbol.endswith('.KQ'):
+            if target_symbol in NAME_CACHE:
+                pass # Already cached
+            else:
+                f_name = executor.submit(get_korean_name, target_symbol)
+        
+        # We need Name for News, so wait for Name first? 
+        # Actually News is not critical for "Fast" display, but users like it.
+        # We can fire news fetch with "assumed" name (from cache or None) or wait slightly?
+        # Let's fire Name first. If cache hit, fire News immediately.
+        # If cache miss, we might delay news slightly or just searching by symbol.
+        
+        stock_name = target_symbol # Default
+        if target_symbol in NAME_CACHE:
+            stock_name = NAME_CACHE[target_symbol]
+        
+        # Fire News
+        f_news = None
+        if target_symbol.endswith('.KS') or target_symbol.endswith('.KQ'):
+             # If we don't have name yet, we might search by symbol or wait? 
+             # Let's search by symbol if name not ready to avoid blocking? 
+             # No, Google News by Code often fails. 
+             # We rely on f_name. Let's chain it? 
+             # For speed, let's just submit the news fetch if we HAVE the name. 
+             # If not, we'll try to fetch news after name resolves (blocking main thread slightly).
+             if target_symbol in NAME_CACHE:
+                 f_news = executor.submit(fetch_google_news, stock_name, 'ko', 'KR')
+        else:
+             # Foreign
+             pass # Logic handles later
+
+        # 3. Assemble Data (Wait with rigid timeouts)
+        
+        # Info (Detailed Summary, Sector, Metrics)
+        # Give it 1.5s max. If fails, we use partial data.
+        info = {}
+        try:
+            info = f_info.result(timeout=1.5)
+        except Exception:
+            print("Info fetch timed out/failed. Using partial data.")
+        
+        # Name (Korean)
+        if f_name:
+            try:
+                kor_name = f_name.result(timeout=1.0)
+                if kor_name:
+                    stock_name = kor_name
+                    NAME_CACHE[target_symbol] = kor_name
+            except: pass
+            
+        # News (Late launch if name wasn't cached)
+        if not f_news and (target_symbol.endswith('.KS') or target_symbol.endswith('.KQ')):
+             if stock_name != target_symbol: # We got a name
+                 f_news = executor.submit(fetch_google_news, stock_name, 'ko', 'KR')
+        
+        # 4. Finalize Values
+        current_price = winner_data['price']
+        previous_close = winner_data['prev_close']
+        currency = winner_data['currency']
+        
+        # KRW Fix
+        if target_symbol.endswith(('.KS', '.KQ')):
+            currency = 'KRW'
+        if not currency: currency = 'USD'
         
         if previous_close and previous_close != 0:
             change_percent = ((current_price - previous_close) / previous_close) * 100
             change_str = f"{change_percent:+.2f}%"
         else:
             change_str = "0.00%"
+            
+        if currency == 'KRW': price_str = f"{current_price:,.0f}"
+        else: price_str = f"{current_price:,.2f}"
 
-        # 언어 감지 및 뉴스 검색 (한국 주식은 ko, 미국은 en)
-        lang = 'ko' if '.KS' in symbol or '.KQ' in symbol else 'en'
-        stock_news = fetch_google_news(f"{symbol} stock news", lang=lang)
+        # Fetch Exchange Rate for Foreign Stocks
+        exchange_rate = 1.0
+        price_krw = None
+        if currency != 'KRW':
+            try:
+                # Use cached or fresh rate
+                rate_ticker = yf.Ticker("KRW=X")
+                exchange_rate = rate_ticker.fast_info.last_price
+                if exchange_rate:
+                    krw_val = current_price * exchange_rate
+                    price_krw = f"{krw_val:,.0f}" # Display as Integer
+            except Exception as e:
+                print(f"Exchange Rate Error: {e}")
 
-        # 재무 지표 추출
-        pe_ratio = info.get('trailingPE')
+
+        # Resolve History
+        daily_prices = []
+        try:
+            daily_prices = f_hist.result(timeout=2.0)
+        except: pass
+        
+        # Resolve News
+        stock_news = []
+        if f_news:
+            try:
+                stock_news = f_news.result(timeout=1.5)
+            except: pass
+        elif not (target_symbol.endswith('.KS') or target_symbol.endswith('.KQ')):
+             # Simple yfinance news fallback
+             try:
+                 stock_news = [{
+                    "title": n.get('content', {}).get('title', ''),
+                    "publisher": n.get('content', {}).get('provider', {}).get('displayName', 'Yahoo'),
+                    "link": n.get('content', {}).get('clickThroughUrl', {}).get('url', ''),
+                    "published": n.get('content', {}).get('pubDate', '')
+                 } for n in ticker.news if n.get('content')]
+             except: pass
+
+        # Metrics from Info (or Fast Info Fallback)
+        pe = info.get('trailingPE')
         pbr = info.get('priceToBook')
         roe = info.get('returnOnEquity')
-        revenue_growth = info.get('revenueGrowth')
-        market_cap = info.get('marketCap')
+        rev_growth = info.get('revenueGrowth')
         
-        # 시가총액 포맷팅 (TK -> Trillion/Billion)
-        if market_cap:
-            if market_cap > 1e12:
-                mkt_cap_str = f"{market_cap / 1e12:.2f}T"
-            elif market_cap > 1e9:
-                mkt_cap_str = f"{market_cap / 1e9:.2f}B"
-            else:
-                mkt_cap_str = f"{market_cap / 1e6:.2f}M"
+        m_cap = info.get('marketCap')
+        if not m_cap: m_cap = winner_data['market_cap'] # Fallback
+        
+        if m_cap:
+            if m_cap > 1e12: mkt_cap_str = f"{m_cap / 1e12:.2f}T"
+            elif m_cap > 1e9: mkt_cap_str = f"{m_cap / 1e9:.2f}B"
+            else: mkt_cap_str = f"{m_cap / 1e6:.2f}M"
         else:
             mkt_cap_str = "N/A"
 
-        # 통화 정보 확인
-        currency = None
-        
-        # 1. 한국 종목(.KS, .KQ)은 무조건 KRW로 강제 설정 (API 오류 방지)
-        if symbol.endswith('.KS') or symbol.endswith('.KQ'):
-            currency = 'KRW'
-            
-        # 2. 그 외의 경우 fast_info 사용
-        if not currency:
-            try:
-                currency = ticker.fast_info.currency
-            except:
-                pass
-        
-        # 3. 그래도 없으면 info 사용
-        if not currency:
-            currency = info.get('currency')
-        
-        # 4. 기본값 설정
-        if not currency:
-            currency = 'USD'
+        executor.shutdown(wait=False)
+
+        # Determine Display Name
+        # For Korean stocks, prefer the Korean name (stock_name) over yfinance's shortName (English)
+        display_name = info.get('shortName', stock_name)
+        if target_symbol.endswith(('.KS', '.KQ')):
+             if stock_name and stock_name != target_symbol:
+                 display_name = stock_name
 
         return {
-            "name": info.get('shortName', symbol),
-            "symbol": symbol,
-            "price": f"{current_price:,.2f}",
+            "name": display_name,
+            "symbol": target_symbol,
+            "price": price_str,
+            "price_krw": price_krw, # Added field
             "currency": currency,
             "change": change_str,
-            "summary": info.get('longBusinessSummary', 'No summary available.'),
-            "sector": info.get('sector', 'Unknown'),
-            # AI 분석을 위한 Raw Data
+            "summary": info.get('longBusinessSummary', '상세 정보 로딩 시간이 지연되어 기본 데이터만 표시합니다.'),
+            "sector": info.get('sector', 'N/A'),
             "financials": {
-                "pe_ratio": pe_ratio,
-                "pbr": pbr,
-                "roe": roe,
-                "revenue_growth": revenue_growth,
-                "market_cap": mkt_cap_str
+                "pe_ratio": pe, "pbr": pbr, "roe": roe, "revenue_growth": rev_growth, "market_cap": mkt_cap_str
             },
-            # Google News 데이터 사용
+            "details": {
+                "prev_close": previous_close,
+                "open": info.get('open'),
+                "day_low": info.get('dayLow'),
+                "day_high": info.get('dayHigh'),
+                "year_low": info.get('fiftyTwoWeekLow'),
+                "year_high": info.get('fiftyTwoWeekHigh'),
+                "volume": info.get('volume'),
+                "market_cap": mkt_cap_str,
+                "pe_ratio": pe,
+                "eps": info.get('trailingEps'),
+                "dividend_yield": info.get('dividendYield'),
+                "forward_pe": info.get('forwardPE'),
+                "forward_eps": info.get('forwardEps'),
+                "pbr": info.get('priceToBook'),
+                "bps": info.get('bookValue'),
+                "dividend_rate": info.get('dividendRate')
+            },
+            "daily_prices": daily_prices,
             "news": stock_news[:5],
-            # 아래는 나중에 AI가 덮어쓸 값들
-            "score": 0, 
-            "metrics": {
-                "supplyDemand": 0,
-                "financials": 0,
-                "news": 0
-            }
+            "score": 0, "metrics": { "supplyDemand": 0, "financials": 0, "news": 0 }
         }
+
     except Exception as e:
         print(f"Error fetching data for {symbol}: {e}")
         return None
@@ -125,51 +388,51 @@ def get_simple_quote(symbol: str):
         else:
             change_str = "0.00%"
             
-        # 이름 가져오기 (느릴 수 있으므로 실패시 심볼 사용)
-        try:
-             # fast_info에는 이름이 없으므로 info가 필요하지만, 
-             # 티커 객체 생성 시점에 일부 메타데이터가 있을 수 있음.
-             # 속도를 위해 이름은 생략하거나 별도 캐싱이 좋지만, 여기선 일단 간단히 시도
-             # info를 호출하면 느려지므로, 차라리 symbol을 리턴하거나 클라이언트가 알도록 함.
-             # 하지만 UI에 이름이 필요하므로... info 호출 최소화가 필요함.
-             # Ticker('AAPL').info 는 HTTP 요청을 함.
-             # 일단은 이름 없이 보내거나, 이름을 꼭 원하면 info 호출 (속도 저하 감수)
-             # 타협: 이름은 WatchlistWidget에서 관리하거나, 처음 추가할 때 DB에 저장하는게 맞음.
-             # 여기서는 UI 표시에 필요한 최소한의 데이터를 위해... info 호출은 뺍니다. 
-             # (Watchlist UI에 이름 표시 부분이 있으니 필요하긴 한데... 
-             #  기존 코드에서 db_manager가 symbol만 저장해서 이름이 없음)
-             # 속도를 위해 일단 이름은 symbol로 대체하고, 필요한 경우만 info 호출 로직 추가 가능.
-             pass
-        except:
-            pass
+        # KRW formatting check
+        if symbol.endswith('.KS') or symbol.endswith('.KQ') or symbol == 'KRW=X':
+             price_str = f"{current_price:,.0f}"
+        else:
+             price_str = f"{current_price:,.2f}"
 
         return {
             "symbol": symbol,
-            "price": f"{current_price:,.2f}",
+            "price": price_str,
             "change": change_str,
-            # 속도 위해 info 호출 생략 -> 이름란에 심볼 표시될 수 있음. 
-            # 제대로 하려면 DB에 name 컬럼 추가를 권장.
             "name": symbol 
         }
     except Exception as e:
-        print(f"Simple Quote Error for {symbol}: {e}")
+        # print(f"Simple Quote Error for {symbol}: {e}")
         return None
 
 
-def fetch_google_news(query, lang='en', period='1d'):
-    """Google News에서 뉴스 검색"""
+import urllib.parse
+
+def fetch_google_news(query, lang='ko', region='KR', period='1d'):
+    """Google News에서 뉴스 검색 (기본값: 한국어, 한국지역)"""
     try:
-        googlenews = GoogleNews(lang=lang, period=period)
-        googlenews.get_news(query)
-        # 결과가 최신순이 아닐 수 있어서 날짜순 정렬 시도 (생략 가능)
+        googlenews = GoogleNews(lang=lang, region=region, period=period)
+        googlenews.search(query) # search 메서드 사용이 더 정확함
         results = googlenews.results()
         
         cleaned_results = []
         for res in results:
+            link = res.get("link", "")
+            
+            # [Fix] Google News Link Cleaning
+            # 1. Remove tracking params (&ved=...)
+            if '&ved=' in link:
+                link = link.split('&ved=')[0]
+            
+            # 2. Decode URL (Fix double encoding like %25 -> %)
+            try:
+                link = urllib.parse.unquote(link)
+            except:
+                pass
+
             cleaned_results.append({
                 "title": res.get("title", ""),
-                "publisher": res.get("media", ""),
-                "link": res.get("link", ""),
+                "publisher": res.get("media", "Google News"),
+                "link": link,
                 "published": res.get("date", "") # 날짜 형식 문자열 그대로 전달
             })
         return cleaned_results
@@ -241,32 +504,37 @@ def get_market_data():
     }
 
 def get_market_news():
-    """시장 전반의 주요 뉴스 수집 (Google News 활용)"""
-    # 주요 키워드로 검색 (Market News, Tech stocks 등)
-    # 한국어 브리핑을 위해 영어 뉴스를 가져와도 되지만, 사용자 편의를 위해 혼합하거나 선택 가능.
-    # 여기서는 글로벌 이슈 파악을 위해 'Stock Market News' (en) 사용
-    
-    news_list = fetch_google_news("Stock Market News", lang='en', period='1d')
-    
-    # 빅테크 뉴스도 추가
-    tech_news = fetch_google_news("NVIDIA Apple Tesla stock", lang='en', period='1d')
-    
-    # 두 리스트 병합 및 중복 제거 (링크 기준)
-    combined = news_list + tech_news
-    seen_links = set()
-    unique_news = []
-    
-    for n in combined:
-        if n['link'] not in seen_links:
-            unique_news.append({
-                "source": n['publisher'],
-                "title": n['title'],
-                "link": n['link'],
-                "time": n['published'] # GoogleNews는 '1 hour ago' 같은 문자열을 줄 때가 많음
-            })
-            seen_links.add(n['link'])
-            
-    return unique_news[:10] # 최대 10개만 반환
+    """시장 전반의 주요 뉴스 수집 (한국어)"""
+    # 글로벌 증시, 미국 증시, 국내 증시 주요 키워드로 검색
+    try:
+        # 여러 키워드 혼합 검색
+        news_queries = ["글로벌 증시", "미국 주식", "국내 주식 시장"]
+        combined_news = []
+        seen_links = set()
+        
+        for q in news_queries:
+            news_items = fetch_google_news(q, lang='ko', region='KR', period='1d')
+            for n in news_items:
+                if n['link'] not in seen_links:
+                    combined_news.append({
+                        "source": n['publisher'],
+                        "title": n['title'],
+                        "link": n['link'],
+                        "time": n['published'] # 시간 포맷은 Google News에서 주는대로 사용
+                    })
+                    seen_links.add(n['link'])
+        
+        # 섞기 보다는 순서대로 (최신순 보장 안되므로 날짜 파싱이 어렵다면 그대로)
+        if not combined_news:
+             # Fallback to Naver News
+             print("Google News empty/blocked. Using Naver News Fallback.")
+             return get_naver_flash_news()
+             
+        return combined_news[:10]
+        
+    except Exception as e:
+        print(f"Error fetching market news: {e}")
+        return get_naver_flash_news()
 
 def calculate_technical_sentiment(symbol="^GSPC"):
     """
@@ -332,6 +600,70 @@ def calculate_technical_sentiment(symbol="^GSPC"):
         print(f"Technical Sentiment Error: {e}")
         return 50
 
+def get_market_status():
+    """
+    시장 신호등 (Traffic Light) - 매매 가능 여부 판독기
+    종합 지수(KOSPI)와 환율, 외국인 수급(추정)을 분석하여 신호등 색상을 반환합니다.
+    """
+    try:
+        # KOSPI & USD/KRW
+        tickers = ["^KS11", "KRW=X"]
+        data = yf.download(tickers, period="1mo", progress=False)['Close']
+        
+        # 데이터가 없을 경우 처리
+        if data.empty:
+            return {"signal": "yellow", "message": "데이터 수신 지연. 관망하세요.", "score": 50}
+
+        # KOSPI 분석
+        kospi = data["^KS11"]
+        kospi_now = kospi.iloc[-1]
+        kospi_ma20 = kospi.rolling(window=20).mean().iloc[-1]
+        
+        # 환율 분석
+        usd = data["KRW=X"]
+        usd_now = usd.iloc[-1]
+        
+        # 신호 결정 로직 & 이유
+        signal = "yellow"
+        message = "도로가 미끄럽습니다. (변동성 심함) 단타 고수가 아니라면 관망하세요."
+        reason = "코스피가 20일 이동평균선 부근에서 횡보하고 있습니다."
+        score = 50
+        
+        # 1. 초록불 (맑음): 코스피가 20일선 위에 있고, 환율이 안정적(1400원 미만 혹은 하락세)
+        if kospi_now > kospi_ma20 and usd_now < 1400:
+            signal = "green"
+            message = "날씨가 맑습니다! (수급 양호) 적극적으로 매수 기회를 노려보세요."
+            reason = f"코스피가 20일 이동평균선({kospi_ma20:,.0f}p)을 상회하고, 환율이 안정권에 진입했습니다."
+            score = 80
+            
+        # 2. 빨간불 (폭우): 코스피가 20일선 아래로 급락하거나, 환율이 급등(1400원 돌파 등)
+        elif kospi_now < kospi_ma20 * 0.98 or usd_now > 1420: # 2% 이상 괴리 혹은 고환율
+            signal = "red"
+            message = "폭우가 쏟아집니다. (전체 시장 하락세) 오늘은 매매를 쉬고 현금을 지키세요."
+            if usd_now > 1420:
+                reason = f"환율이 {usd_now:,.1f}원으로 치솟아 외국인 수급 이탈 우려가 큽니다."
+            else:
+                reason = f"코스피가 20일 이동평균선({kospi_ma20:,.0f}p) 아래로 크게 하락하여 추세가 꺾였습니다."
+            score = 20
+        
+        # 나머지는 노란불 (기본값)
+        
+        return {
+            "signal": signal,
+            "message": message,
+            "reason": reason,
+            "score": score,
+            "details": {
+                "kospi": f"{kospi_now:,.0f}",
+                "kospi_trend": "Bull" if kospi_now > kospi_ma20 else "Bear",
+                "usd": f"{usd_now:,.1f}"
+            }
+        }
+        
+    except Exception as e:
+        print(f"Market Status Error: {e}")
+        return {"signal": "yellow", "message": "시장 데이터 분석 중 오류 발생.", "score": 50}
+
 def get_insider_trading(symbol: str):
     """
     해당 종목의 내부자 거래 내역을 가져옵니다.
@@ -383,7 +715,7 @@ def get_insider_trading(symbol: str):
 
 def get_macro_calendar():
     """
-    이번 주의 주요 거시 경제 일정(CPI, FOMC 등)을 반환합니다.
+    주요 거시경제 일정을 반환합니다.
     실제 API 연동 대신 데모용 정적 데이터를 반환합니다.
     추후 Fred API나 Investing.com 크롤링으로 대체 가능.
     """
@@ -399,14 +731,16 @@ def get_macro_calendar():
         {"event": "PPI 발표 (생산자물가지수)", "importance": "Medium", "time": "22:30"}
     ]
     
-    # 요일별로 배치 (월~금)
-    weekly_calendar = []
+    # 이번 주 월요일 계산 (월요일=0, 일요일=6)
     start_of_week = today - datetime.timedelta(days=today.weekday())
+    
+    weekly_calendar = []
     
     for i in range(5):
         day = start_of_week + datetime.timedelta(days=i)
         
-        # 임의로 이벤트 배정 (실제론 날짜 매핑 필요)
+        # 임의로 이벤트 배정 (실제론 날짜 매핑 필요 - 현재는 데모용으로 고정 요일에 할당)
+        # 매주 같은 요일에 이벤트가 표시되게 됩니다.
         day_events = []
         if i == 1: # 화
              day_events.append(events[0])
@@ -426,55 +760,161 @@ def get_macro_calendar():
         
     return weekly_calendar
 
+from concurrent.futures import ThreadPoolExecutor
+
+
+# Global Cache for Asset Data
+ASSET_DATA_CACHE = {
+    "data": {},
+    "timestamp": 0
+}
+ASSET_CACHE_DURATION = 15  # 15 seconds cache to prevent rate limiting
+
 def get_all_assets():
     """
     주식, 코인, 환율, 원자재 등 다양한 자산군의 현재 시세를 반환합니다.
+    (병렬 처리로 속도 개선 + 캐싱 적용)
     """
-    tickers = {
-        "Indices": [
-            {"symbol": "^GSPC", "name": "S&P 500"},
-            {"symbol": "^KS11", "name": "KOSPI"},
-            {"symbol": "^N225", "name": "Nikkei 225"}
-        ],
-        "Crypto": [
-            {"symbol": "BTC-USD", "name": "Bitcoin"},
-            {"symbol": "ETH-USD", "name": "Ethereum"},
-            {"symbol": "XRP-USD", "name": "Ripple"}
-        ],
-        "Forex": [
-            {"symbol": "KRW=X", "name": "USD/KRW"},
-            {"symbol": "JPYKRW=X", "name": "JPY/KRW"},
-            {"symbol": "EURKRW=X", "name": "EUR/KRW"}
-        ],
-        "Commodity": [
-            {"symbol": "GC=F", "name": "Gold"},
-            {"symbol": "CL=F", "name": "Crude Oil"},
-            {"symbol": "SI=F", "name": "Silver"}
-        ]
+    global ASSET_DATA_CACHE
+    import time
+    from korea_data import get_naver_market_index_data
+    import requests
+
+    current_time = time.time()
+    if ASSET_DATA_CACHE["data"] and (current_time - ASSET_DATA_CACHE["timestamp"] < ASSET_CACHE_DURATION):
+        return ASSET_DATA_CACHE["data"]
+
+    result = {
+        "Indices": [],
+        "Crypto": [],
+        "Forex": [],
+        "Commodity": []
     }
-    
-    result = {}
-    
-    for category, items in tickers.items():
-        category_data = []
-        for item in items:
-            try:
-                t = yf.Ticker(item["symbol"])
-                # fast_info 사용
-                price = t.fast_info.last_price
-                prev = t.fast_info.previous_close
-                change = ((price - prev) / prev) * 100
+
+    # 1. Fetch Naver Market Data (Indices, Forex, Commodity)
+    try:
+        naver_data = get_naver_market_index_data()
+        
+        # Indices (World Exchange)
+        # Naver returns: [{"name": "다우산업(미국)", "price": "34,000.00", "change": "-10.00", "is_up": False}, ...]
+        if "world_exchange" in naver_data:
+            for item in naver_data["world_exchange"]:
+                # Filter useful indices if needed, or take all
+                result["Indices"].append(item)
                 
-                category_data.append({
-                    "symbol": item["symbol"],
-                    "name": item["name"],
-                    "price": price,
-                    "change": change,
-                    "currency": "USD" if "USD" in item["symbol"] or "=F" in item["symbol"] else "KRW" 
-                })
-            except Exception as e:
-                # 에러 발생 시 더미 데이터 혹은 생략
-                pass
-        result[category] = category_data
+        # Forex (Exchange)
+        if "exchange" in naver_data:
+            result["Forex"] = naver_data["exchange"]
+
+        # Commodity (Oil, Gold, Raw Materials)
+        if "oil" in naver_data:
+            result["Commodity"].extend(naver_data["oil"])
+        if "gold" in naver_data:
+            result["Commodity"].extend(naver_data["gold"])
+        if "raw_materials" in naver_data:
+             # [Fix] Filter out currency items mixed in raw_materials
+             safe_raw = [
+                 m for m in naver_data["raw_materials"] 
+                 if not any(c in m['name'].upper() for c in ['USD', 'EUR', 'JPY', 'CNY', '환율', '달러', '유로', '엔'])
+             ]
+             result["Commodity"].extend(safe_raw)
+
+        # [Deduplication] Remove duplicates by name
+        unique_commodities = {}
+        for item in result["Commodity"]:
+            unique_commodities[item['name']] = item
+        result["Commodity"] = list(unique_commodities.values())
+
+        # [Fallback/Enrichment] Fetch Extra Commodities via yfinance if list is short or missing key items
+        # Silver, Copper, Natural Gas, Corn
+        extra_tickers = {
+            "SI=F": "국제 은 (Silver)", 
+            "HG=F": "구리 (Copper)", 
+            "NG=F": "천연가스 (Nat Gas)", 
+            "ZC=F": "옥수수 (Corn)"
+        }
+        
+        # Check if we already have them (simple check)
+        existing_names = "".join([c['name'] for c in result["Commodity"]])
+        
+        import yfinance as yf
+        for sym, name in extra_tickers.items():
+            # If name keyword not in existing list (e.g. '은' not in '국제 금...')
+            # Simple heuristic: exclude if very similar name exists
+            should_add = True
+            if "은" in name and "은" in existing_names: should_add = False
+            if "구리" in name and "구리" in existing_names: should_add = False
+            if "가스" in name and "가스" in existing_names: should_add = False
+            if "옥수수" in name and "옥수수" in existing_names: should_add = False
+
+            if should_add:
+                try:
+                    yg = yf.Ticker(sym)
+                    price = yg.fast_info.last_price
+                    prev = yg.fast_info.previous_close
+                    if price and prev:
+                        change = ((price - prev) / prev) * 100
+                        curr_sym = "$" # Commodities usually USD
+                        
+                        item = {
+                            "name": name,
+                            "price": f"{price:,.2f}",
+                            "change": f"{abs(change):.2f}%",
+                            "is_up": change >= 0
+                        }
+                        result["Commodity"].append(item)
+                except:
+                    pass
+
+    except Exception as e:
+        print(f"Naver Data Fetch Error in get_all_assets: {e}")
+
+    # 2. Fetch Crypto Data (Upbit API)
+    # Markets: BTC, ETH, XRP, SOL, DOGE, ADA, DOT, AVX, ETC, LINK (Top 10ish)
+    upbit_codes = [
+        "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE", 
+        "KRW-ADA", "KRW-TRX", "KRW-AVAX", "KRW-LINK", "KRW-SHIB"
+    ]
+    try:
+        url = "https://api.upbit.com/v1/ticker"
+        params = {"markets": ",".join(upbit_codes)}
+        res = requests.get(url, params=params, timeout=3)
+        if res.status_code == 200:
+            crypto_data = res.json()
+            # crypto_data is a list of objects
+            for c in crypto_data:
+                market = c['market'] # KRW-BTC
+                symbol = market.split('-')[1] # BTC
+                
+                # Name Mapping
+                name_map = {
+                    "BTC": "Bitcoin", "ETH": "Ethereum", "XRP": "Ripple", "SOL": "Solana",
+                    "DOGE": "Dogecoin", "ADA": "Cardano", "TRX": "Tron", 
+                    "AVAX": "Avalanche", "LINK": "Chainlink", "SHIB": "Shiba Inu"
+                }
+                name = name_map.get(symbol, symbol)
+                
+                price = c['trade_price']
+                prev_price = c['prev_closing_price']
+                change_rate = c['signed_change_rate'] * 100 # -0.01 -> -1.0
+                
+                # Upbit returns change rate, so we use it directly
+                is_up = change_rate >= 0
+                
+                item = {
+                    "symbol": f"{symbol}-KRW",
+                    "name": name,
+                    "price": price, # Number format (KRW)
+                    "change": f"{abs(change_rate):.2f}", # Without % sign, will be added by frontend or logic
+                    "is_up": is_up
+                }
+                result["Crypto"].append(item)
+    except Exception as e:
+        print(f"Upbit API Error: {e}")
+
+    # Update Cache
+    if result["Indices"] or result["Crypto"]:
+        ASSET_DATA_CACHE["data"] = result
+        ASSET_DATA_CACHE["timestamp"] = time.time()
         
     return result

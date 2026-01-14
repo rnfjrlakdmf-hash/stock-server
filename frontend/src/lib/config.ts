@@ -3,17 +3,27 @@ import { Capacitor } from '@capacitor/core';
 // API Base URL
 // Web/Server: Use current hostname (supports localhost, 0.0.0.0, and local IP)
 // Android Emulator: "http://10.0.2.2:8000" (via Capacitor detection)
-const isNative = typeof window !== 'undefined' && Capacitor.isNativePlatform();
+// More robust check for Android environment (including WebView)
+const isAndroid = typeof window !== 'undefined' && (
+    Capacitor.getPlatform() === 'android' ||
+    /Android/i.test(navigator.userAgent)
+);
 
-let apiBase = "http://localhost:8000"; // Default for Server-Side Rendering
+let apiBase = "http://localhost:8000";
 
 if (typeof window !== 'undefined') {
-    if (isNative) {
+    if (isAndroid) {
+        // Android Emulator Loopback Address
         apiBase = "http://10.0.2.2:8000";
     } else {
-        // Use the same hostname as the browser (e.g. 192.168.0.5 -> 192.168.0.5:8000)
-        apiBase = `http://${window.location.hostname}:8000`;
+        // Web Browser / Desktop
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            apiBase = "http://localhost:8000";
+        } else {
+            apiBase = `http://${window.location.hostname}:8000`;
+        }
     }
+    console.log(`[Config] Running on ${isAndroid ? 'Android' : 'Web'}, API URL: ${apiBase}`);
 }
 
 export const API_BASE_URL = apiBase;

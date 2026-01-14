@@ -1,11 +1,19 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import Sidebar from "@/components/Sidebar";
+import ClosingBanner from "@/components/ClosingBanner";
+import Script from "next/script";
+import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
   title: "AI Stock Analyst",
   description: "AI-powered stock analysis platform",
 };
+
+
+
+
+// ... imports
 
 export default function RootLayout({
   children,
@@ -13,20 +21,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="antialiased bg-[#050505] text-white">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 relative overflow-hidden bg-gradient-to-br from-[#050505] via-[#0a0a0a] to-[#111] text-foreground">
-            {/* Background Glow Effects */}
-            {/* Background Glow Effects - Optimized */}
-            <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />
-            <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />
+    <html lang="en" suppressHydrationWarning>
+      <body className="antialiased bg-[#050505] text-white" suppressHydrationWarning>
+        <AuthProvider>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <main className="flex-1 relative overflow-hidden bg-gradient-to-br from-[#050505] via-[#0a0a0a] to-[#111] text-foreground">
+              {/* Background Glow Effects */}
+              <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />
+              <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-3xl -z-10 pointer-events-none" />
 
-            {children}
-          </main>
-        </div>
+              {children}
+
+              {/* Closing Report Banner */}
+              <ClosingBanner />
+            </main>
+          </div>
+        </AuthProvider>
       </body>
     </html>
   );
 }
+
+

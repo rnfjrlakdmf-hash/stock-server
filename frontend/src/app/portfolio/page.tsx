@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Header from "@/components/Header";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { Plus, Trash2, Zap, Loader2, PieChart as PieChartIcon } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
+import AdRewardModal from "@/components/AdRewardModal";
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
 
@@ -32,11 +33,24 @@ export default function PortfolioPage() {
         if (e.key === 'Enter') addSymbol();
     };
 
+
+
+    const [showAdModal, setShowAdModal] = useState(false);
+    const [hasPaid, setHasPaid] = useState(false);
+
     const runOptimization = async () => {
         if (symbols.length < 2) {
             setError("최소 2개 이상의 종목이 필요합니다.");
             return;
         }
+
+        // Check for Pro Mode
+        const isPro = localStorage.getItem("isPro") === "true";
+        if (!isPro && !hasPaid) {
+            setShowAdModal(true);
+            return;
+        }
+
         setLoading(true);
         setError("");
 
@@ -63,9 +77,23 @@ export default function PortfolioPage() {
         }
     };
 
+    const handleAdReward = () => {
+        setHasPaid(true);
+        setShowAdModal(false);
+        // Retry immediately
+        setTimeout(runOptimization, 100);
+    };
+
     return (
         <div className="min-h-screen pb-10 text-white">
             <Header title="AI 포트폴리오 최적화" subtitle="Efficient Frontier 기반 최적 자산 배분" />
+
+            <AdRewardModal
+                isOpen={showAdModal}
+                onClose={() => setShowAdModal(false)}
+                onReward={handleAdReward}
+                featureName="AI Portfolio Optimizer"
+            />
 
             <div className="p-6 max-w-6xl mx-auto space-y-8">
 

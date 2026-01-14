@@ -9,17 +9,18 @@ CACHE_TOP10 = {
 }
 CACHE_DURATION = 15  # 15초
 
-def get_realtime_top10(market="KR"):
+def get_realtime_top10(market="KR", refresh=False):
     """
     KOSPI(국내) 및 S&P500(미국) 시가총액 상위 10개 실시간 시세 조회
     market: 'KR' or 'US'
+    refresh: True면 캐시 무시하고 강제 업데이트
     """
     global CACHE_TOP10
     import time
     
     current_time = time.time()
-    if market in CACHE_TOP10 and CACHE_TOP10[market].get("data") and (current_time - CACHE_TOP10[market]["timestamp"] < CACHE_DURATION):
-        print(f"Returning cached ranking for {market}")
+    # refresh가 아니고 데이터가 있으면 즉시 반환 (속도 최적화)
+    if not refresh and market in CACHE_TOP10 and CACHE_TOP10[market].get("data"):
         return CACHE_TOP10[market]["data"]
 
     # 1. 종목 리스트 확보
@@ -65,23 +66,40 @@ def get_realtime_top10(market="KR"):
         try:
             ticker = yf.Ticker(item['ticker'])
             
-            # 안전하게 데이터 확보 시도
             price = 0.0
             prev_close = 0.0
             
+            # 1단계: fast_info 시도
             try:
-                # fast_info가 이상한 값을 줄 때가 있으므로 체크
                 price = getattr(ticker.fast_info, 'last_price', 0.0)
                 prev_close = getattr(ticker.fast_info, 'previous_close', 0.0)
             except:
-                # fast_info 실패 시 info 시도 (느리지만)
+                pass
+                
+            # 2단계: history 시도 (데이터가 0이거나 실패 시)
+            if price == 0 or prev_close == 0:
                 try:
-                    info = ticker.info
-                    price = info.get('currentPrice', info.get('regularMarketPrice', 0.0))
-                    prev_close = info.get('previousClose', info.get('regularMarketPreviousClose', 0.0))
+                    # 최근 5일치 가져와서 마지막 종가를 현재가로 사용
+                    hist = ticker.history(period="5d")
+                    if not hist.empty:
+                        price = hist['Close'].iloc[-1]
+                        if len(hist) >= 2:
+                            prev_close = hist['Close'].iloc[-2]
+                        else:
+                            prev_close = price # 전일 데이터 없으면 0% 변동으로 처리
                 except:
                     pass
             
+            # 3단계: info 시도 (마지막 수단)
+            if price == 0:
+                 try:
+                    info = ticker.info
+                    price = info.get('currentPrice', info.get('regularMarketPrice', 0.0))
+                    if prev_close == 0:
+                        prev_close = info.get('previousClose', info.get('regularMarketPreviousClose', 0.0))
+                 except:
+                    pass
+
             # None 체크 및 형변환
             if price is None: price = 0.0
             if prev_close is None: prev_close = 0.0
@@ -101,7 +119,9 @@ def get_realtime_top10(market="KR"):
                 "change": float(change),
                 "change_percent": float(change_pct)
             }
-        except Exception:
+        except Exception as e:
+            # 에러 로그 출력 (디버깅용)
+            print(f"Error fetching {item['ticker']}: {e}")
             # 완전 실패 시 0으로 채워서 반환 (리스트에서 빠지지 않게)
             return {
                 "rank": 0, 
@@ -115,9 +135,13 @@ def get_realtime_top10(market="KR"):
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(fetch_data, item) for item in symbols]
         for future in futures:
-            res = future.result()
-            if res:
-                results.append(res)
+            try:
+                # 타임아웃 2초 설정 (전체 응답 지연 방지)
+                res = future.result(timeout=2)
+                if res:
+                    results.append(res)
+            except Exception as e:
+                print(f"Fetch thread error or timeout: {e}")
     
     # 3. 시가총액 순이 아닐 수 있으므로 (미국장은 순동이 심함), 가격순? 아니면 고정 리스트 순서대로?
     # 요청은 "1위부터 10위까지" 이므로 시가총액 데이터를 같이 가져와서 정렬하면 좋겠지만, 

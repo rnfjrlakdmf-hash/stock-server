@@ -4,11 +4,14 @@ import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import GaugeChart from "@/components/GaugeChart";
 import { fetchStockAnalysis, fetchThemeAnalysis, fetchChatResponse, StockData } from "@/lib/api";
-import MacroCalendar from "@/components/MacroCalendar";
-import { TrendingUp, Zap, Activity, AlertCircle, Loader2, Star, Coins, Globe, BarChart3, Droplets, UserCheck, Layers, AlertTriangle, MessageSquare } from "lucide-react";
+
+import { TrendingUp, Zap, Activity, AlertCircle, Loader2, Coins, Globe, BarChart3, Droplets, Layers, AlertTriangle, MessageSquare } from "lucide-react";
+
 import { API_BASE_URL } from "@/lib/config";
 import Link from 'next/link';
 import { getTickerFromKorean } from "@/lib/stockMapping";
+
+import MarketDashboard from "@/components/MarketDashboard";
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
@@ -69,21 +72,11 @@ export default function Home() {
         {/* Real-time Top 10 Ranking */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <TopRankingWidget market="KR" title="국내 증시 Top 10" />
-          <TopRankingWidget market="US" title="미국 증시 Top 10" />
+          <TopRankingWidget market="US" title="해외 증시 Top 10" />
         </div>
 
-        {/* 2. Control Center (Shortcuts to Pro Tools) */}
-        {!stockData && !loading && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-150">
-            <Link href="/coach" className="bg-gradient-to-br from-orange-900/40 to-black hover:from-orange-900/60 p-5 rounded-2xl border border-white/5 hover:border-orange-500/50 transition-all group">
-              <UserCheck className="w-8 h-8 text-orange-500 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-gray-200 group-hover:text-white">트레이딩 코치</h3>
-              <p className="text-xs text-gray-500 mt-1">매매 멘탈 & 습관 교정</p>
-            </Link>
-          </div>
-        )}
-
-        {/* Search Loading/Error State */}
+        {/* Korea Market Dashboard */}
+        <MarketDashboard onSearch={handleSearch} />        {/* Search Loading/Error State */}
         {loading && (
           <div className="flex flex-col items-center justify-center p-12 text-blue-400">
             <Loader2 className="h-10 w-10 animate-spin mb-4" />
@@ -172,58 +165,12 @@ export default function Home() {
         ) : !loading && !error && (
           // Default Dashboard Content
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 rounded-3xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-8 backdrop-blur-md relative overflow-hidden group">
-              {/* ... (Existing AI Briefing Mockup) ... */}
-              <div className="absolute top-0 right-0 p-8 opacity-20 group-hover:opacity-40 transition-opacity">
-                <Zap className="h-32 w-32 text-yellow-400 -rotate-12" />
-              </div>
-              <div className="relative z-10">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="p-2 rounded-lg bg-yellow-500/20 text-yellow-400">
-                    <Zap className="h-6 w-6" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-white drop-shadow-md">오늘의 AI 브리핑</h2>
-                </div>
-                <div className="space-y-4 mb-8">
-                  <div className="p-6 rounded-xl bg-black/40 border border-white/10 hover:border-white/20 transition-colors shadow-lg">
-                    <h3 className="text-xl font-bold text-blue-200 mb-2">시장 팁</h3>
-                    <p className="text-gray-200 leading-relaxed text-lg font-medium">
-                      상단 검색바에 종목명(티커)을 입력하여 실시간 AI 분석 리포트를 받아보세요.<br />
-                      예: <strong>AAPL, NVDA, TSLA</strong>
-                    </p>
-                  </div>
-                </div>
 
-              </div>
-            </div>
+
 
             <div className="space-y-6">
-              <WatchlistWidget />
-              <MacroCalendar />
-              <div className="rounded-3xl border border-white/5 bg-black/40 p-6 backdrop-blur-md">
-                <div className="flex items-center gap-2 mb-6">
-                  <Activity className="h-5 w-5 text-purple-400" />
-                  <h2 className="text-xl font-bold text-white">인기 급상승 종목</h2>
-                </div>
-                <div className="space-y-3">
-                  {[
-                    { name: "NVDA", price: "$492.11", change: "+2.4%", desc: "AI 수요 급증" },
-                    { name: "TSLA", price: "$245.32", change: "-1.2%", desc: "인도량 하향 조정" },
-                  ].map((stock) => (
-                    <div key={stock.name} className="flex items-center justify-between p-4 rounded-xl hover:bg-white/10 transition-colors cursor-pointer group bg-black/20 border border-transparent hover:border-white/10">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-lg text-white">{stock.name}</span>
-                        </div>
-                      </div>
-                      <div className={`text-right ${stock.change.startsWith('+') ? 'text-green-400' : 'text-red-400'}`}>
-                        <div className="font-bold text-lg">{stock.price}</div>
-                        <div className="text-sm font-semibold">{stock.change}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+
+
             </div>
           </div>
         )}
@@ -232,102 +179,7 @@ export default function Home() {
   );
 }
 
-function WatchlistWidget() {
-  const [watchlist, setWatchlist] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchWatchlist = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/watchlist`);
-        const json = await res.json();
-        if (json.status === "success" && json.data.length > 0) {
-          setWatchlist(json.data.map((symbol: string) => ({ symbol })));
-        } else {
-          setWatchlist([]);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchWatchlist();
-
-    // Polling for updates every 10s (optional)
-    const interval = setInterval(fetchWatchlist, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 간이 시세 조회 기능 (실제로는 API에서 한 번에 가져오는 게 좋음)
-  const [quotes, setQuotes] = useState<Record<string, any>>({});
-  useEffect(() => {
-    if (watchlist.length === 0) return;
-
-    const fetchQuotes = async () => {
-      // 여기서는 MVP로 각 종목 API를 호출하지만, 추후 배치 조회 API 권장
-      const newQuotes: Record<string, any> = {};
-      for (const item of watchlist) {
-        try {
-          // MVP: Use existing individual stock API (might be slow for many items)
-          // A better approach is to make a bulk endpoint
-          const res = await fetch(`${API_BASE_URL}/api/quote/${item.symbol}`);
-          const json = await res.json();
-          if (json.status === "success") {
-            newQuotes[item.symbol] = json.data;
-          }
-        } catch (e) { }
-      }
-      setQuotes(newQuotes);
-    };
-    fetchQuotes();
-  }, [watchlist]);
-
-
-  return (
-    <div className="rounded-3xl border border-white/5 bg-gradient-to-br from-blue-900/20 to-black p-6 backdrop-blur-md">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-white flex items-center gap-2">
-          <Star className="h-5 w-5 text-yellow-400 fill-yellow-400" /> 관심 종목
-        </h2>
-        <span className="text-xs text-gray-400">실시간</span>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center p-4"><Loader2 className="animate-spin text-gray-500" /></div>
-      ) : watchlist.length === 0 ? (
-        <div className="text-center py-8 text-gray-500 bg-white/5 rounded-xl border border-dashed border-white/10">
-          <p>관심 종목이 없습니다.</p>
-          <p className="text-xs mt-1">종목 발굴 페이지에서 추가해주세요.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {watchlist.map((item) => {
-            const data = quotes[item.symbol];
-            return (
-              <div key={item.symbol} className="flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors border border-white/5">
-                <div>
-                  <span className="font-bold text-white">{item.symbol}</span>
-                  {data && <div className="text-xs text-gray-400">{data.name.substring(0, 15)}</div>}
-                </div>
-                <div className="text-right">
-                  {data ? (
-                    <>
-                      <div className="font-bold text-white">{data.price}</div>
-                      <div className={`text-xs font-bold ${data.change.includes('+') ? 'text-green-400' : 'text-red-400'}`}>{data.change}</div>
-                    </>
-                  ) : (
-                    <Loader2 className="w-4 h-4 animate-spin text-gray-600" />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 
 function AssetTicker() {
@@ -363,24 +215,27 @@ function AssetTicker() {
     { key: 'Commodity', icon: <Droplets className="text-orange-400" />, label: '원자재' }
   ];
 
+  // 데이터가 비어있을 경우에 대한 방어 로직 (로딩이 끝났는데도 카테고리가 없으면 에러가 날 수 있음)
+  const availableCategories = categories.filter((cat: any) => assets[cat.key] && Array.isArray(assets[cat.key]));
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
-      {categories.map((cat) => (
+      {availableCategories.map((cat) => (
         <div key={cat.key} className="bg-black/40 border border-white/5 rounded-2xl p-4 backdrop-blur-md flex flex-col h-full">
           <div className="flex items-center gap-2 mb-3 opacity-60">
             {cat.icon}
             <span className="text-xs font-bold uppercase tracking-wider text-gray-300">{cat.label}</span>
           </div>
           <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar">
-            {assets[cat.key]?.map((item: any) => (
-              <div key={item.symbol} className="flex justify-between items-center text-sm">
+            {assets[cat.key]?.slice(0, 5).map((item: any, idx: number) => (
+              <div key={`${cat.key}-${item.symbol}-${idx}`} className="flex justify-between items-center text-sm">
                 <span className="font-medium text-gray-200 whitespace-nowrap truncate">{item.name.replace(' Market', '').replace('USD/KRW', 'USD').replace('JPY/KRW', 'JPY')}</span>
                 <div className="text-right">
                   <div className="font-bold text-white">
-                    {item.currency === 'KRW' ? '₩' : '$'}{item.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {item.currency === 'KRW' ? '₩' : '$'}{item.price.toLocaleString(undefined, { maximumFractionDigits: item.currency === 'KRW' ? 0 : 2 })}
                   </div>
                   <div className={`text-[10px] ${item.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}%
+                    {item.change >= 0 ? '+' : ''}{Number(item.change || 0).toFixed(2)}%
                   </div>
                 </div>
               </div>
@@ -418,7 +273,7 @@ function TopRankingWidget({ market, title }: { market: string, title: string }) 
   }, [market]);
 
   return (
-    <div className="bg-black/40 border border-white/5 rounded-3xl p-6 backdrop-blur-md flex flex-col h-[500px]">
+    <div className="bg-black/40 border border-white/5 rounded-3xl p-6 backdrop-blur-md flex flex-col h-[350px]">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className={`p-2 rounded-lg ${market === 'KR' ? 'bg-blue-500/20 text-blue-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
@@ -440,7 +295,7 @@ function TopRankingWidget({ market, title }: { market: string, title: string }) 
       ) : (
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
           {data.map((item, idx) => (
-            <div key={item.symbol} className="flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors group">
+            <div key={`${item.symbol}-${idx}`} className="flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors group">
               <div className="flex items-center gap-3">
                 <span className={`w-6 text-center font-bold ${idx < 3 ? 'text-yellow-400' : 'text-gray-500'}`}>{item.rank}</span>
                 <div>
@@ -450,10 +305,10 @@ function TopRankingWidget({ market, title }: { market: string, title: string }) 
               </div>
               <div className="text-right">
                 <div className="font-bold text-gray-200 text-sm">
-                  {market === 'US' ? '$' : '₩'}{Number(item.price).toLocaleString(undefined, { maximumFractionDigits: market === 'US' ? 2 : 0 })}
+                  {market === 'US' ? '$' : '₩'}{Number(item.price || 0).toLocaleString(undefined, { maximumFractionDigits: market === 'US' ? 2 : 0 })}
                 </div>
                 <div className={`text-xs font-bold ${market === 'US' ? (item.change >= 0 ? 'text-green-400' : 'text-red-400') : (item.change >= 0 ? 'text-red-400' : 'text-blue-400')}`}>
-                  {item.change >= 0 ? '+' : ''}{item.change_percent.toFixed(2)}%
+                  {item.change >= 0 ? '+' : ''}{Number(item.change_percent || 0).toFixed(2)}%
                 </div>
               </div>
             </div>

@@ -35,6 +35,9 @@ export default function MacroCalendar() {
             }
         };
         fetchCalendar();
+
+        const interval = setInterval(fetchCalendar, 60000); // 1분마다 갱신
+        return () => clearInterval(interval);
     }, []);
 
     if (loading) return <div className="text-center p-4"><Loader2 className="animate-spin text-gray-400" /></div>;
@@ -50,49 +53,61 @@ export default function MacroCalendar() {
                 <h2 className="text-xl font-bold text-white">이번 주 주요 경제 일정</h2>
             </div>
 
-            {/* Highlight Section (Next High Impact) */}
-            {importantEvents.length > 0 && (
-                <div className="mb-6 p-4 rounded-xl bg-blue-900/20 border border-blue-500/30">
-                    <h3 className="text-blue-200 font-bold mb-2 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-blue-400" />
-                        주목해야 할 일정 (High Impact)
-                    </h3>
-                    <ul className="space-y-2">
-                        {importantEvents.slice(0, 2).map((evt, idx) => (
-                            <li key={idx} className="text-sm text-gray-200 flex justify-between items-center">
-                                <span>{evt.event}</span>
-                                <span className="text-xs bg-black/40 px-2 py-1 rounded text-gray-400">{evt.day} {evt.time}</span>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-
-            {/* Weekly Timeline */}
+            {/* Vertical Agenda View (Calendar Style) */}
             <div className="space-y-4">
-                {calendar.map((day, idx) => (
-                    <div key={idx} className={`relative pl-4 border-l-2 ${day.events.some(e => e.importance === 'High') ? 'border-red-400' : 'border-white/10'}`}>
-                        <div className="mb-2">
-                            <span className="text-sm font-bold text-white">{day.day}</span>
-                            <span className="text-xs text-gray-500 ml-2">{day.date}</span>
-                        </div>
-                        {day.events.length > 0 ? (
-                            <ul className="space-y-2">
-                                {day.events.map((evt, eIdx) => (
-                                    <li key={eIdx} className="text-sm flex items-start gap-2">
-                                        <div className={`mt-1.5 w-1.5 h-1.5 rounded-full ${evt.importance === 'High' ? 'bg-red-400' : 'bg-gray-500'}`} />
-                                        <div>
-                                            <div className="text-gray-300">{evt.event}</div>
-                                            <div className="text-xs text-gray-500">{evt.time}</div>
+                {calendar.map((day, idx) => {
+                    const isTodayChk = new Date().toISOString().slice(0, 10) === day.date;
+                    const hasHighImpact = day.events.some(e => e.importance === 'High');
+
+                    return (
+                        <div key={idx} className={`rounded-xl border ${isTodayChk ? 'bg-blue-900/10 border-blue-500/50' : 'bg-white/5 border-white/5'} overflow-hidden transition-all hover:bg-white/10`}>
+                            {/* Day Header */}
+                            <div className={`px-4 py-2 flex items-center justify-between ${isTodayChk ? 'bg-blue-500/20' : 'bg-white/5'}`}>
+                                <div className="flex items-center gap-2">
+                                    <span className={`font-bold ${['Saturday', 'Sunday'].includes(day.day) ? 'text-red-400' : 'text-gray-200'}`}>
+                                        {day.day}
+                                    </span>
+                                    <span className="text-xs text-gray-500 font-mono">{day.date}</span>
+                                </div>
+                                {isTodayChk && <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold">TODAY</span>}
+                            </div>
+
+                            {/* Events List */}
+                            <div className="p-3 space-y-2">
+                                {day.events.length > 0 ? (
+                                    day.events.map((evt, eIdx) => (
+                                        <div key={eIdx} className="flex items-start gap-3 text-sm p-2 rounded hover:bg-black/20">
+                                            {/* Time & Impact Indicator */}
+                                            <div className="flex flex-col items-center min-w-[50px]">
+                                                <span className={`text-xs font-mono font-bold ${evt.importance === 'High' ? 'text-red-400' : 'text-gray-400'}`}>
+                                                    {evt.time}
+                                                </span>
+                                                {evt.importance === 'High' && (
+                                                    <span className="mt-1 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" title="High Impact"></span>
+                                                )}
+                                            </div>
+
+                                            {/* Event Name */}
+                                            <div className={`flex-1 break-words ${evt.importance === 'High' ? 'font-bold text-white' : 'text-gray-300'}`}>
+                                                {evt.event}
+                                            </div>
                                         </div>
-                                    </li>
-                                ))}
-                            </ul>
-                        ) : (
-                            <p className="text-xs text-gray-600">주요 일정 없음</p>
-                        )}
-                    </div>
-                ))}
+                                    ))
+                                ) : (
+                                    <div className="text-center text-xs text-gray-600 py-2 italic">
+                                        주요 일정 없음
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-3 text-xs text-gray-500">
+                <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-red-500"></span> High Impact
+                </div>
             </div>
         </div>
     );

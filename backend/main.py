@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="AI Stock Analyst", version="1.0.0")
 
+# Force Reload Trigger 4
 # CORS 설정 (Frontend인 localhost:3000 에서의 접근 허용)
 origins = [
     "*",
@@ -30,36 +31,105 @@ from rank_data import get_realtime_top10
 from risk_monitor import check_portfolio_risk
 from backtest import run_backtest
 from portfolio_opt import optimize_portfolio
-from alerts import add_alert, get_alerts, delete_alert, check_alerts
+from alerts import (
+    add_alert, get_alerts, delete_alert, check_alerts,
+    get_recent_telegram_users
+)
 from chatbot import chat_with_ai
-from korea_data import get_naver_disclosures
-from db_manager import save_analysis_result, get_score_history, add_watchlist, remove_watchlist, get_watchlist, cast_vote, get_vote_stats
+from korea_data import get_naver_disclosures, get_naver_market_dashboard, get_naver_market_index_data, get_naver_sise_data, get_naver_main_data, get_ipo_data, get_live_investor_estimates, get_theme_heatmap_data
+from db_manager import save_analysis_result, get_score_history, add_watchlist, remove_watchlist, get_watchlist, cast_vote, get_vote_stats, get_prediction_report
 from pydantic import BaseModel, Field
+
+import urllib.parse
+import time
+import threading
+
+@app.get("/api/stock/{symbol}/investors/live")
+def read_live_investors(symbol: str):
+    """장중 잠정 투자자 동향 (라이브)"""
+    symbol = urllib.parse.unquote(symbol)
+    data = get_live_investor_estimates(symbol)
+    if data:
+        return {"status": "success", "data": data}
+    else:
+        return {"status": "error", "message": "Failed to fetch live investor data"}
+
+@app.get("/api/korea/heatmap")
+def read_korea_heatmap():
+    """테마별 히트맵 데이터"""
+    # This might be slow, so we can consider caching here too if needed
+    data = get_theme_heatmap_data()
+    return {"status": "success", "data": data}
+
+@app.get("/api/report/prediction")
+def read_prediction_report():
+    """지난 AI 예측 적중률 리포트"""
+    report = get_prediction_report()
+    return {"status": "success", "data": report}
 
 @app.get("/api/stock/{symbol}")
 def read_stock(symbol: str):
+    # URL 인코딩 해제 (한글 종목명 처리)
+    symbol = urllib.parse.unquote(symbol).strip()
     data = get_stock_info(symbol)
     if data:
-        # AI 분석 실행
-        ai_result = analyze_stock(data)
+        # AI 분석 실행 (MARKET 심볼은 이미 get_stock_info에서 처리됨)
+        if data["symbol"] != "MARKET":
+            ai_result = analyze_stock(data)
+            
+            # 분석 결과를 기존 데이터에 병합 (점수, 코멘트 업데이트)
+            data.update({
+                "score": ai_result.get("score", 50),
+                "metrics": ai_result.get("metrics", {"supplyDemand": 50, "financials": 50, "news": 50}),
+                "summary": ai_result.get("analysis_summary", data["summary"]),
+                "strategy": ai_result.get("strategy", {}),   # New
+                "rationale": ai_result.get("rationale", {}),  # New
+                "related_stocks": ai_result.get("related_stocks", []) # New
+            })
+            
         
-        # 분석 결과를 기존 데이터에 병합 (점수, 코멘트 업데이트)
-        data.update({
-            "score": ai_result.get("score", 50),
-            "metrics": ai_result.get("metrics", {"supplyDemand": 50, "financials": 50, "news": 50}),
-            "summary": ai_result.get("analysis_summary", data["summary"])  # 기존 요약 덮어쓰기
-        })
+            # [New] 관련 종목 실시간 시세 업데이트 (AI가 심볼만 주므로 가격은 따로 조회)
+            if "related_stocks" in data:
+                for item in data["related_stocks"]:
+                    try:
+                        # AI may give symbols like "005930" without .KS, or "AAPL"
+                        sym = item.get("symbol")
+                        # Basic fix for Korean codes if extension missing
+                        if sym and sym.isdigit() and len(sym) == 6:
+                            sym += ".KS"
+                            
+                        q = get_simple_quote(sym)
+                        if q:
+                            item["price"] = q["price"]
+                            item["change"] = q["change"]
+                        else:
+                            item["price"] = "-"
+                            item["change"] = "-"
+                    except:
+                        item["price"] = "-"
+                        item["change"] = "-"
+
+            # [New] AI 번역 뉴스가 있으면 원본 뉴스 업데이트
+            t_news = ai_result.get("translated_news", [])
+            if t_news:
+                # 원본 뉴스 리스트 순서와 AI가 처리한 순서가 같다고 가정 (Top 5)
+                for i, news_item in enumerate(data.get("news", [])):
+                    if i < len(t_news):
+                        # 한글 제목 및 요약 적용
+                        news_item["title"] = t_news[i].get("title", news_item["title"])
+                        news_item["summary"] = t_news[i].get("summary", "") # 요약 필드 추가 (프론트에서 보여줄 수 있음)
         
         # [New] 분석 결과 DB 저장 (히스토리용)
         save_analysis_result(data)
         
         return {"status": "success", "data": data}
     else:
-        return {"status": "error", "message": "Stock not found or error fetching data"}
+        return {"status": "error", "message": f"Stock not found or error fetching data for '{symbol}'"}
 
 @app.get("/api/quote/{symbol}")
 def read_quote(symbol: str):
     """AI 분석 없이 시세만 빠르게 조회"""
+    symbol = urllib.parse.unquote(symbol)
     data = get_simple_quote(symbol)
     if data:
         return {"status": "success", "data": data}
@@ -103,6 +173,7 @@ class AlertRequest(BaseModel):
     symbol: str
     target_price: float
     condition: str = "above" # above or below
+    chat_id: str = None # [New] Optional Telegram Chat ID
 
 @app.get("/api/alerts")
 def read_alerts():
@@ -112,7 +183,8 @@ def read_alerts():
 @app.post("/api/alerts")
 def create_alert(req: AlertRequest):
     """새 알림 생성"""
-    alert = add_alert(req.symbol, req.target_price, req.condition)
+    # chat_id가 없으면 None으로 넘어감 -> alerts.py에서 처리
+    alert = add_alert(req.symbol, req.target_price, req.condition, req.chat_id)
     return {"status": "success", "data": alert}
 
 @app.get("/api/theme/{keyword}")
@@ -152,26 +224,47 @@ def trigger_check_alerts():
     triggered = check_alerts()
     return {"status": "success", "data": triggered}
 
+@app.get("/api/telegram/recent-users")
+def read_recent_telegram_users():
+    """최근 봇과 대화한 사용자 목록 반환"""
+    users = get_recent_telegram_users()
+    return {"status": "success", "data": users}
+
+from auth import router as auth_router
+app.include_router(auth_router, prefix="/api")
+
 class WatchlistRequest(BaseModel):
     symbol: str
 
+from fastapi import Header
+
 @app.get("/api/watchlist")
-def read_watchlist():
-    """관심 종목 리스트 반환"""
-    symbols = get_watchlist()
-    # TODO: 여기에 각 종목의 현재가 등 간략 정보를 추가해서 보낼 수 있음
+def read_watchlist(x_user_id: str = Header(None)):
+    """관심 종목 리스트 반환 (헤더 X-User-ID 필수)"""
+    user_id = x_user_id if x_user_id else "guest"
+    symbols = get_watchlist(user_id)
     return {"status": "success", "data": symbols}
 
 @app.post("/api/watchlist")
-def create_watchlist(req: WatchlistRequest):
+def create_watchlist(req: WatchlistRequest, x_user_id: str = Header(None)):
     """관심 종목 추가"""
-    success = add_watchlist(req.symbol)
+    user_id = x_user_id if x_user_id else "guest"
+    success = add_watchlist(user_id, req.symbol)
     return {"status": "success" if success else "error"}
 
 @app.delete("/api/watchlist/{symbol}")
-def delete_watchlist(symbol: str):
+def delete_watchlist(symbol: str, x_user_id: str = Header(None)):
     """관심 종목 삭제"""
-    remove_watchlist(symbol)
+    user_id = x_user_id if x_user_id else "guest"
+    remove_watchlist(user_id, symbol)
+    return {"status": "success"}
+
+
+@app.delete("/api/watchlist")
+def clear_all_watchlist():
+    """관심 종목 전체 삭제"""
+    from db_manager import clear_watchlist
+    clear_watchlist()
     return {"status": "success"}
 
 class ChatRequest(BaseModel):
@@ -186,8 +279,173 @@ def chat_endpoint(req: ChatRequest):
 @app.get("/api/korea/disclosure/{symbol}")
 def read_korea_disclosure(symbol: str):
     """한국 주식 전자공시 조회 (네이버 금융)"""
+    symbol = urllib.parse.unquote(symbol)
     data = get_naver_disclosures(symbol)
     return {"status": "success", "data": data}
+
+import json
+import os
+
+# Dashboard Cache
+dashboard_cache = {
+    "data": None,
+    "timestamp": 0
+}
+CACHE_DURATION = 5 # seconds
+CACHE_FILE_PATH = "dashboard_cache.json"
+
+def dashboard_bg_looper():
+    """Background task to keep dashboard cache warm"""
+    global dashboard_cache
+    print("Starting dashboard background updater...")
+    while True:
+        try:
+            data = get_naver_market_dashboard()
+            if data and len(data.get("exchange", [])) > 0:
+                dashboard_cache["data"] = data
+                dashboard_cache["timestamp"] = time.time()
+                
+                # Persist cache to file
+                try:
+                    with open(CACHE_FILE_PATH, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False)
+                except Exception as e:
+                    print(f"Failed to save cache file: {e}")
+                    
+        except Exception as e:
+            print(f"Background Update Error: {e}")
+        time.sleep(CACHE_DURATION)
+
+def load_persistent_cache():
+    """Load cached data from file on startup"""
+    global dashboard_cache
+    if os.path.exists(CACHE_FILE_PATH):
+        try:
+            with open(CACHE_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data:
+                    dashboard_cache["data"] = data
+                    dashboard_cache["timestamp"] = time.time() # Refresh timestamp to serve immediately
+                    print("loaded dashboard cache from file")
+        except Exception as e:
+            print(f"Failed to load cache file: {e}")
+
+def ranking_bg_looper():
+    """Background task to keep top 10 ranking cache warm"""
+    print("Starting ranking background updater...")
+    while True:
+        try:
+            # KR, US 순차 업데이트
+            get_realtime_top10("KR", refresh=True)
+            time.sleep(2) # API 부하 분산
+            get_realtime_top10("US", refresh=True)
+        except Exception as e:
+            print(f"Ranking Background Update Error: {e}")
+        time.sleep(20) # 20초마다 갱신
+
+@app.on_event("startup")
+def start_background_tasks():
+    load_persistent_cache()
+    
+    t_dash = threading.Thread(target=dashboard_bg_looper, daemon=True)
+    t_dash.start()
+    
+    t_rank = threading.Thread(target=ranking_bg_looper, daemon=True)
+    t_rank.start()
+
+@app.get("/api/korea/dashboard")
+def read_korea_dashboard():
+    """한국 증시 주요 지표 (환율, 금리, 유가, 업종, 테마) 크롤링"""
+    global dashboard_cache
+    current_time = time.time()
+    
+    # Check cache (Stale-While-Revalidate: 데이터가 있으면 즉시 반환)
+    if dashboard_cache["data"]:
+        return {"status": "success", "data": dashboard_cache["data"], "cached": True}
+        
+    try:
+        data = get_naver_market_dashboard()
+        # Only cache if valid (must have exchange data at least)
+        if data and len(data.get("exchange", [])) > 0:
+            dashboard_cache["data"] = data
+            dashboard_cache["timestamp"] = current_time
+        return {"status": "success", "data": data}
+    except Exception as e:
+        print(f"Dashboard Fetch Error: {e}")
+        # Fallback to stale cache if error occurs
+        if dashboard_cache["data"]:
+             return {"status": "success", "data": dashboard_cache["data"], "cached": True, "stale": True}
+        return {"status": "error", "message": "Failed to fetch dashboard data", "data": {}}
+
+@app.get("/api/korea/indices")
+def read_korea_indices():
+    """한국 증시: 환율, 유가, 금리, 원자재 등 시장 지표만 반환"""
+    global dashboard_cache
+    
+    # Cache hit
+    if dashboard_cache["data"]:
+        cached = dashboard_cache["data"]
+        return {"status": "success", "data": {
+            "exchange": cached.get("exchange", []),
+            "world_exchange": cached.get("world_exchange", []),
+            "oil": cached.get("oil", []),
+            "gold": cached.get("gold", []),
+            "interest": cached.get("interest", []),
+            "raw_materials": cached.get("raw_materials", [])
+        }, "cached": True}
+
+    # Cache miss
+    try:
+        data = get_naver_market_index_data()
+        return {"status": "success", "data": data}
+    except Exception as e:
+         print(f"Indices Fetch Error: {e}")
+         return {"status": "error", "message": "Failed to fetch indices", "data": {}}
+
+@app.get("/api/korea/sectors")
+def read_korea_sectors():
+    """한국 증시: 업종 및 테마 상위 데이터만 반환"""
+    global dashboard_cache
+
+    if dashboard_cache["data"]:
+        cached = dashboard_cache["data"]
+        return {"status": "success", "data": {
+            "top_sectors": cached.get("top_sectors", []),
+            "top_themes": cached.get("top_themes", [])
+        }, "cached": True}
+
+    try:
+        data = get_naver_sise_data()
+        return {"status": "success", "data": {"top_sectors": data.get("top_sectors", []), "top_themes": data.get("top_themes", [])}}
+    except Exception as e:
+        print(f"Sectors Fetch Error: {e}")
+        return {"status": "error", "message": "Failed to fetch sectors", "data": {}}
+
+@app.get("/api/korea/investors")
+def read_korea_investors():
+    """한국 증시: 투자자별 매매동향 및 메인 요약 반환 (가장 느릴 수 있음)"""
+    global dashboard_cache
+
+    if dashboard_cache["data"]:
+        cached = dashboard_cache["data"]
+        return {"status": "success", "data": {
+            "market_summary": cached.get("market_summary", {}),
+            "investor_items": cached.get("investor_items", {})
+        }, "cached": True}
+
+    try:
+        sise = get_naver_sise_data()
+        main = get_naver_main_data()
+        return {
+            "status": "success", 
+            "data": {
+                "market_summary": main.get("market_summary", {}),
+                "investor_items": sise.get("investor_items", {})
+            }
+        }
+    except Exception as e:
+        print(f"Investors Fetch Error: {e}")
+        return {"status": "error", "message": "Failed to fetch investor data", "data": {}}
 
 @app.get("/api/market")
 def read_market():
@@ -199,6 +457,12 @@ def read_market():
 def read_all_assets():
     """모든 자산군(주식, 코인, 환율 등)의 시세 반환"""
     data = get_all_assets()
+    return {"status": "success", "data": data}
+
+@app.get("/api/market/calendar")
+def read_market_calendar():
+    """경제 캘린더 데이터 반환"""
+    data = get_macro_calendar()
     return {"status": "success", "data": data}
 
 @app.get("/api/earnings/{symbol}")
@@ -284,6 +548,101 @@ def read_risk():
     data = check_portfolio_risk(["TSLA", "NVDA", "AAPL", "AMZN", "GOOGL", "AMD", "PLTR"])
     return {"status": "success", "data": data}
 
+from stock_data import get_market_status
+from ai_analysis import diagnose_portfolio_health
+
+@app.get("/api/market/status")
+def read_market_status():
+    """시장 신호등 상태 반환"""
+    status = get_market_status()
+    return {"status": "success", "data": status}
+
+@app.get("/api/korea/ipo")
+def read_ipo_calendar():
+    """한국 IPO 일정 조회"""
+    data = get_ipo_data()
+    return {"status": "success", "data": data}
+
+class DiagnosisRequest(BaseModel):
+    portfolio: list[str]
+
+@app.post("/api/portfolio/diagnosis")
+def create_portfolio_diagnosis(req: DiagnosisRequest):
+    """내 계좌 건강검진 (AI 진단)"""
+    result = diagnose_portfolio_health(req.portfolio)
+    return {"status": "success", "data": result}
+
+
+
+class AlertRequest(BaseModel):
+    symbol: str
+    target_price: float
+    condition: str
+    chat_id: str = None
+
+@app.post("/api/alerts")
+def create_new_alert(req: AlertRequest):
+    """가격 알림 추가"""
+    alert = add_alert(req.symbol, req.target_price, req.condition, req.chat_id)
+    return {"status": "success", "data": alert}
+
+@app.get("/api/alerts")
+def read_alerts():
+    """알림 목록 조회"""
+    return {"status": "success", "data": get_alerts()}
+
+@app.delete("/api/alerts/{alert_id}")
+def remove_alert(alert_id: int):
+    """알림 삭제"""
+    delete_alert(alert_id)
+    return {"status": "success"}
+
+@app.get("/api/telegram/recent-users")
+def read_recent_telegram_users():
+    """텔레그램 봇 최근 사용자 조회 (ID 찾기용)"""
+    users = get_recent_telegram_users()
+    return {"status": "success", "data": users}
+
+
+@app.get("/api/watchlist/closing-summary")
+def read_closing_summary():
+    """장 마감 시황 및 관심종목 요약 (배너용)"""
+    # 현재 시간 기준 장 마감 여부 간단 체크 (데모용: 실제로는 복잡한 휴장일 로직 필요)
+    # 한국장: 평일 15:40 이후 / 미국장: 평일 06:10 이후
+    # 여기서는 데이터만 주면 프론트가 판단하도록 함
+    
+    watchlist = get_watchlist()
+    if not watchlist:
+        return {"status": "empty", "data": []}
+        
+    summary = []
+    for symbol in watchlist:
+        # urllib unquote might be needed if symbols stored with % encoded
+        symbol = urllib.parse.unquote(symbol)
+        q = get_simple_quote(symbol)
+        if q:
+            summary.append(q)
+            
+    return {
+        "status": "success",
+        "data": summary,
+        "timestamp": time.time()
+    }
+
+@app.on_event("startup")
+def startup_event():
+    """서버 시작 시 백그라운드 작업 실행"""
+    def run_scheduler():
+        while True:
+            try:
+                # 30초마다 알림 체크
+                check_alerts()
+            except Exception as e:
+                print(f"Scheduler Error: {e}")
+            time.sleep(30)
+
+    thread = threading.Thread(target=run_scheduler, daemon=True)
+    thread.start()
 
 if __name__ == "__main__":
     import uvicorn

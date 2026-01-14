@@ -14,17 +14,21 @@ interface Message {
 }
 
 export default function ChatPage() {
-    const [messages, setMessages] = useState<Message[]>([
-        {
-            role: 'ai',
-            content: "안녕하세요! 저는 AI 주식 상담사입니다. \n종목 분석, 시황 질문, 투자 고민 등 무엇이든 물어보세요! \n(예: '테슬라 지금 사도 될까?', '오늘 나스닥 어때?')",
-            time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-            isNew: true
-        }
-    ]);
+    const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        setMessages([
+            {
+                role: 'ai',
+                content: "안녕하세요! 저는 AI 주식 상담사입니다. \n종목 분석, 시황 질문, 투자 고민 등 무엇이든 물어보세요! \n(예: '테슬라 지금 사도 될까?', '오늘 나스닥 어때?')",
+                time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+                isNew: true
+            }
+        ]);
+    }, []);
 
     useEffect(() => {
         if (scrollRef.current) {

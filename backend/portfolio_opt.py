@@ -3,17 +3,82 @@ import pandas as pd
 import numpy as np
 import scipy.optimize as sco
 
+# Common Korean stock name to ticker mapping
+NAME_TO_TICKER = {
+    "삼성전자": "005930.KS",
+    "SK하이닉스": "000660.KS",
+    "LG에너지솔루션": "373220.KS",
+    "삼성바이오로직스": "207940.KS",
+    "현대차": "005380.KS",
+    "기아": "000270.KS",
+    "셀트리온": "068270.KS",
+    "KB금융": "105560.KS",
+    "신한지주": "055550.KS",
+    "NAVER": "035420.KS",
+    "네이버": "035420.KS",
+    "POSCO홀딩스": "005490.KS",
+    "포스코홀딩스": "005490.KS",
+    "삼성물산": "028260.KS",
+    "현대모비스": "012330.KS",
+    "카카오": "035720.KS",
+    "하나금융지주": "086790.KS",
+    "메리츠금융지주": "138040.KS",
+    "LG전자": "066570.KS",
+    "삼성생명": "032830.KS",
+    "삼성SDI": "006400.KS",
+    "삼성중공업": "010140.KS",
+    "한국전력": "015760.KS",
+    "HMM": "011200.KS",
+    "두산에너빌리티": "034020.KS",
+    "하이브": "352820.KS",
+    "대한항공": "003490.KS",
+    "SK텔레콤": "017670.KS",
+    "고려아연": "010130.KS",
+    "KT&G": "033780.KS",
+    "우리금융지주": "316140.KS",
+    "기업은행": "024110.KS",
+    "S-Oil": "010950.KS",
+    "에쓰오일": "010950.KS",
+    "HD현대중공업": "329180.KS",
+    "LG화학": "051910.KS",
+}
+
+def resolve_ticker(name: str) -> str:
+    # 1. Check mapping
+    if name in NAME_TO_TICKER:
+        return NAME_TO_TICKER[name]
+    
+    # 2. Handle partial matches or English variations if needed (Simple version)
+    # If it ends with .KS or .KQ, assume it's already a ticker
+    if name.endswith('.KS') or name.endswith('.KQ'):
+        return name
+        
+    # 3. If it looks like a US ticker (all alpha), return as is
+    # If it looks like a KR code (6 digits), append .KS
+    if name.isdigit() and len(name) == 6:
+        return f"{name}.KS"
+        
+    return name
+
 def get_data(symbols, period="1y"):
     """여러 종목의 수정주가 데이터를 가져옵니다."""
     data = pd.DataFrame()
-    for sym in symbols:
+    for sym_input in symbols:
+        sym = resolve_ticker(sym_input) # Resolve name to ticker
         try:
             ticker = yf.Ticker(sym)
             hist = ticker.history(period=period)
             if not hist.empty:
-                data[sym] = hist['Close']
+                # Use original input name for column if possible, or ticker
+                # But to avoid confusion, let's use the resolved ticker or a Display Name map back?
+                # For optimization math, key doesn't matter much, but for display it does.
+                # Let's keep the user's input symbol as the key if possible, OR mapped ticker.
+                # Using resolved ticker is safer for uniqueness.
+                data[sym_input] = hist['Close']
+            else:
+                print(f"Empty data for {sym} (Input: {sym_input})")
         except Exception as e:
-            print(f"Failed to fetch {sym}: {e}")
+            print(f"Failed to fetch {sym} (Input: {sym_input}): {e}")
     return data
 
 def portfolio_annualised_performance(weights, mean_returns, cov_matrix):

@@ -35,7 +35,21 @@ export async function fetchStockAnalysis(symbol: string): Promise<StockData | nu
     }
 }
 
-export async function fetchThemeAnalysis(keyword: string): Promise<any> {
+export interface ThemeStock {
+    symbol: string;
+    name: string;
+    reason: string;
+}
+
+export interface ThemeAnalysisResult {
+    theme: string;
+    description: string;
+    risk_factor: string;
+    leaders: ThemeStock[];
+    followers: ThemeStock[];
+}
+
+export async function fetchThemeAnalysis(keyword: string): Promise<ThemeAnalysisResult | null> {
     try {
         const response = await fetch(`${API_BASE_URL}/api/theme/${keyword}`);
         if (!response.ok) return null;

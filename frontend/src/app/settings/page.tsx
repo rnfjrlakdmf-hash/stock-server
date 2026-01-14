@@ -3,15 +3,46 @@
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import { Settings, Key, Bell, Moon, Shield, Save, Crown } from "lucide-react";
+import { API_BASE_URL } from "@/lib/config";
 
 export default function SettingsPage() {
     const [isPro, setIsPro] = useState(false);
     const [secretCount, setSecretCount] = useState(0);
 
+    // [New] Telegram Config State
+    const [telegramId, setTelegramId] = useState("");
+    const [loadingConfig, setLoadingConfig] = useState(false);
+    const [configError, setConfigError] = useState("");
+
     useEffect(() => {
         const saved = localStorage.getItem("isPro");
         if (saved === "true") setIsPro(true);
+
+        const savedTg = localStorage.getItem("telegramId");
+        if (savedTg) setTelegramId(savedTg);
     }, []);
+
+    const findMyTelegramId = async () => {
+        setLoadingConfig(true);
+        setConfigError("");
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/telegram/recent-users`);
+            const json = await res.json();
+            if (json.status === "success" && json.data.length > 0) {
+                // 가장 최근 사용자 (첫번째) 선택
+                const user = json.data[0];
+                setTelegramId(user.id);
+                localStorage.setItem("telegramId", user.id);
+                alert(`ID found! Connected as ${user.name}`);
+            } else {
+                setConfigError("최근 메시지를 찾을 수 없습니다. 봇에게 메시지를 보냈는지 확인하세요.");
+            }
+        } catch (e) {
+            setConfigError("서버 연결 실패");
+        } finally {
+            setLoadingConfig(false);
+        }
+    };
 
     const togglePro = () => {
         const newVal = !isPro;
@@ -86,6 +117,48 @@ export default function SettingsPage() {
                                 <button className="absolute right-3 top-1/2 -translate-y-1/2 text-xs bg-blue-600 px-3 py-1 rounded-lg hover:bg-blue-500">Edit</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                {/* Mobile Notification Setup */}
+                <div className="rounded-3xl bg-black/20 border border-white/10 p-8">
+                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                        <Bell className="w-5 h-5 text-green-400" /> Mobile Notification (Telegram)
+                    </h3>
+                    <div className="space-y-6">
+                        <div className="bg-white/5 p-4 rounded-xl border border-white/10 text-sm text-gray-300 leading-relaxed">
+                            <p className="mb-2"><strong className="text-white">1단계:</strong> 텔레그램 앱에서 <strong className="text-yellow-400">@rnfjrlAlarm_bot</strong> 을 검색하세요.</p>
+                            <p className="mb-2"><strong className="text-white">2단계:</strong> 봇에게 아무 메시지나 보내세요. (예: &quot;hello&quot;)</p>
+                            <p><strong className="text-white">3단계:</strong> 아래 <strong className="text-blue-400">&apos;내 ID 찾기&apos;</strong> 버튼을 누르면 자동으로 ID가 입력됩니다.</p>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <div className="relative flex-1">
+                                <input
+                                    type="text"
+                                    value={telegramId}
+                                    onChange={(e) => {
+                                        setTelegramId(e.target.value);
+                                        localStorage.setItem("telegramId", e.target.value);
+                                    }}
+                                    placeholder="Telegram Chat ID (숫자)"
+                                    className="w-full h-12 rounded-xl bg-white/5 border border-white/10 px-4 text-white font-mono text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                                />
+                                {telegramId && (
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 flex items-center gap-1 text-xs font-bold">
+                                        <Shield className="w-3 h-3" /> Connected
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                onClick={findMyTelegramId}
+                                disabled={loadingConfig}
+                                className="bg-green-600 hover:bg-green-500 text-white px-6 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 whitespace-nowrap"
+                            >
+                                {loadingConfig ? "찾는 중..." : "내 ID 찾기"}
+                            </button>
+                        </div>
+                        {configError && <p className="text-red-400 text-xs">{configError}</p>}
                     </div>
                 </div>
 

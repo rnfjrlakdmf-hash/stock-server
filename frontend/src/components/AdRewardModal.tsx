@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { X, Play, Loader2, Coins, Zap } from "lucide-react";
+import { requestPayment } from "@/lib/payment";
+import { API_BASE_URL } from "@/lib/config";
 
 interface AdModalProps {
     isOpen: boolean;
@@ -13,6 +15,21 @@ interface AdModalProps {
 export default function AdRewardModal({ isOpen, onClose, onReward, featureName }: AdModalProps) {
     const [isPlaying, setIsPlaying] = useState(false);
     const [timeLeft, setTimeLeft] = useState(5); // 5초 광고 시뮬레이션
+    const [exchangeRate, setExchangeRate] = useState<number>(1450);
+
+    useEffect(() => {
+        if (isOpen) {
+            fetch(`${API_BASE_URL}/api/market/status`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === "success" && data.data.details?.usd) {
+                        const rate = parseFloat(data.data.details.usd.replace(/,/g, ''));
+                        if (!isNaN(rate)) setExchangeRate(rate);
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+    }, [isOpen]);
 
     useEffect(() => {
         let timer: NodeJS.Timeout;
@@ -30,6 +47,9 @@ export default function AdRewardModal({ isOpen, onClose, onReward, featureName }
         }
         return () => clearInterval(timer);
     }, [isPlaying, timeLeft, onReward]);
+
+    const proPriceUsd = 3.5;
+    const proPriceKrw = Math.floor(proPriceUsd * exchangeRate / 10) * 10;
 
     if (!isOpen) return null;
 
@@ -96,9 +116,23 @@ export default function AdRewardModal({ isOpen, onClose, onReward, featureName }
                         </button>
                     </div>
 
-                    <div className="mt-6 pt-4 border-t border-white/5 flex justify-center items-center gap-2 text-xs text-gray-500">
-                        <Zap className="w-3 h-3 text-yellow-500" />
-                        <span>Premium 회원은 광고가 없습니다.</span>
+
+                    <div className="mt-4 pt-4 border-t border-white/5 space-y-3">
+                        <button
+                            onClick={() => {
+                                requestPayment(() => {
+                                    localStorage.setItem("isPro", "true");
+                                    alert("결제가 완료되었습니다! 프로 기능이 활성화됩니다.");
+                                    window.location.reload();
+                                });
+                            }}
+                            className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-bold text-md hover:shadow-lg hover:shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+                        >
+                            <Zap className="w-4 h-4 fill-white" /> 월 ${proPriceUsd} (약 ₩{proPriceKrw.toLocaleString()})으로 광고 제거
+                        </button>
+                        <p className="text-center text-[10px] text-gray-500">
+                            * 실시간 환율({exchangeRate.toLocaleString()}원/$) 적용
+                        </p>
                     </div>
                 </div>
             )}

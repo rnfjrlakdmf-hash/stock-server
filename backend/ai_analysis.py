@@ -16,19 +16,46 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 if API_KEY:
     try:
         genai.configure(api_key=API_KEY)
-        print("[SUCCESS] Gemini API Key loaded successfully.")
+        # Security: Mask key in logs
+        masked_key = API_KEY[:4] + "*" * (len(API_KEY)-8) + API_KEY[-4:]
+        print(f"[SUCCESS] Gemini API Key loaded successfully. ({masked_key})")
     except Exception as e:
         print(f"[ERROR] Failed to configure Gemini API: {e}")
 else:
     print(f"[WARNING] Gemini API Key not found in {env_path}")
 
 def get_json_model():
-    """JSON 출력을 강제하는 Gemini 모델 반환"""
+    """JSON 출력을 강제하는 Gemini 모델 반환 (기본값)"""
     return genai.GenerativeModel('gemini-2.0-flash', generation_config={"response_mime_type": "application/json"})
 
 def get_text_model():
     """일반 텍스트 출력을 위한 Gemini 모델 반환"""
-    return genai.GenerativeModel('gemini-2.0-flash')
+    return genai.GenerativeModel('gemini-1.5-flash')
+
+def generate_with_retry(prompt: str, json_mode: bool = True):
+    """
+    여러 모델을 순차적으로 시도하여 API 제한/오류를 우회합니다.
+    """
+    models_to_try = [
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash",
+        "gemini-1.5-pro"
+    ]
+    
+    last_error = None
+    
+    for model_name in models_to_try:
+        try:
+            config = {"response_mime_type": "application/json"} if json_mode else {}
+            model = genai.GenerativeModel(model_name, generation_config=config)
+            response = model.generate_content(prompt)
+            return response
+        except Exception as e:
+            print(f"[WARNING] Model {model_name} failed: {e}")
+            last_error = e
+            continue
+            
+    raise last_error
 
 def analyze_stock(stock_data: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -43,6 +70,22 @@ def analyze_stock(stock_data: Dict[str, Any]) -> Dict[str, Any]:
 
     model = get_json_model()
 
+    # [Safe Convert] Financials의 NaN 처리
+    import math
+    safe_financials = {}
+    raw_fin = stock_data.get('financials', {})
+    if isinstance(raw_fin, dict):
+        for k, v in raw_fin.items():
+            try:
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    safe_financials[k] = "N/A"
+                else:
+                    safe_financials[k] = v
+            except:
+                safe_financials[k] = str(v)
+    else:
+        safe_financials = str(raw_fin)
+
     # 프롬프트 구성
     prompt = f"""
     You are a professional stock market analyst from Wall Street. 
@@ -53,7 +96,7 @@ def analyze_stock(stock_data: Dict[str, Any]) -> Dict[str, Any]:
     - Name: {stock_data.get('name')}
     - Price: {stock_data.get('price')} {stock_data.get('currency')}
     - Sector: {stock_data.get('sector')}
-    - Financials: {stock_data.get('financials')}
+    - Financials: {json.dumps(safe_financials, ensure_ascii=False)}
     
     Recent News Headlines (Source & Time):
     {json.dumps([f"[{n['publisher']}] {n['title']} ({n.get('published','')})" for n in stock_data.get('news', [])], ensure_ascii=False)}
@@ -64,7 +107,18 @@ def analyze_stock(stock_data: Dict[str, Any]) -> Dict[str, Any]:
     3. Assign a 'Total Score' (0-100) combining financials and sentiment.
     4. Assign sub-scores for 'Supply/Demand' (Technical), 'Financials' (Fundamental), and 'Sentiment' (News - based on actual headlines).
     5. Write a brief 'Investment Briefing' (Korean, 3 sentences max) summarizing WHY you gave this score.
-
+    6. **Translate and summarize** the top 5 news headlines into Korean.
+    7. Trading Strategy:
+    8. 3-Line Rationale:
+       - 'supply': Supply/Demand argument.
+       - 'momentum': Momentum argument.
+       - 'risk': Major risk factor.
+    9. Identify 5 'Related Stocks' (Peers/Competitors) in the same industry/sector.
+       - If the stock is Korean (e.g. Samsung Electronics), prioritize Korean peers if possible, or global leaders.
+       - If the stock is Global (e.g. Apple), prioritize Global peers.
+       - Provide 'Symbol' (Correct ticker for Yahoo Finance or Naver) and 'Name'.
+       - Brief reason (Korean) why it's related.
+    
     Response Format (JSON only):
     {{
         "score": <0-100>,
@@ -73,22 +127,55 @@ def analyze_stock(stock_data: Dict[str, Any]) -> Dict[str, Any]:
             "financials": <0-100>,
             "news": <0-100>
         }},
-        "analysis_summary": "<Korean analysis text>"
+        "analysis_summary": "<Korean analysis text>",
+        "strategy": {{
+            "target": <number>,
+            "stop_loss": <number>,
+            "win_rate": <number>
+        }},
+        "rationale": {{
+            "supply": "<Korean text>",
+            "momentum": "<Korean text>",
+            "risk": "<Korean text>"
+        }},
+        "translated_news": [
+            {{ "original_title": "...", "title": "<Korean Title>", "summary": "<Korean 1-line summary>" }},
+            ...
+        ],
+        "related_stocks": [
+            {{ "symbol": "...", "name": "...", "reason": "..." }},
+            ...
+        ]
     }}
     """
 
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
 
     except Exception as e:
         print(f"AI Analysis Error: {e}")
-        return get_mock_analysis(stock_data)
+        # 에러 발생 시 fallback으로 모델 변경 시도
+        try:
+             # 재시도 로직이 generate_with_retry에 있으므로 여기선 생략
+             pass
+        except:
+            pass
+            
+        return get_mock_analysis(stock_data, error_msg=str(e))
 
-def get_mock_analysis(stock_data):
+def get_mock_analysis(stock_data, error_msg: str = None):
     """API 호출 실패/미설정 시 보여줄 그럴싸한 가짜 데이터"""
     symbol = stock_data.get('symbol', '')
     
+    summary = f"현재 {symbol} 데이터에 대한 AI 분석 연결이 설정되지 않았습니다. 기본적으로 양호한 재무 상태를 유지하고 있는 것으로 보이며, 상세 분석을 위해서는 Gemini API 키가 필요합니다."
+    
+    if error_msg:
+        if "429" in error_msg or "Quota" in error_msg:
+            summary = f"AI 요청 한도(Quota)를 초과했습니다. 잠시 후 시도하거나, Google AI Studio에서 결제 정보를 등록(Pay-as-you-go)하면 해결됩니다."
+        else:
+            summary = f"AI 분석 중 오류가 발생했습니다: {error_msg}. (일시적인 서비스 장애일 수 있습니다)"
+
     return {
         "score": 75,
         "metrics": {
@@ -96,7 +183,12 @@ def get_mock_analysis(stock_data):
             "financials": 80,
             "news": 60
         },
-        "analysis_summary": f"현재 {symbol} 데이터에 대한 AI 분석 연결이 설정되지 않았습니다. 기본적으로 양호한 재무 상태를 유지하고 있는 것으로 보이며, 상세 분석을 위해서는 Gemini API 키가 필요합니다."
+        "analysis_summary": summary,
+        "related_stocks": [
+            {"symbol": "AAPL", "name": "Apple", "reason": "동일 섹터 (Tech) 대장주"},
+            {"symbol": "MSFT", "name": "Microsoft", "reason": "글로벌 기술 경쟁사"},
+            {"symbol": "GOOGL", "name": "Alphabet", "reason": "AI 및 플랫폼 경쟁"}
+        ]
     }
 
 def generate_market_briefing(market_data: Dict[str, Any], news_data: list, tech_score: int = 50) -> Dict[str, Any]:
@@ -140,21 +232,28 @@ def generate_market_briefing(market_data: Dict[str, Any], news_data: list, tech_
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Briefing Gen Error: {e}")
-        return get_mock_briefing()
+        return get_mock_briefing(error_msg=str(e))
 
-def get_mock_briefing():
+def get_mock_briefing(error_msg: str = None):
+    summary_text = "현재 Gemini API 키가 설정되지 않아 AI 브리핑을 생성할 수 없습니다. .env 파일을 확인해주세요."
+    if error_msg:
+        if "429" in error_msg or "Quota" in error_msg:
+             summary_text = f"AI 요청 한도(Quota)를 초과했습니다. 잠시 후 재시도하거나 Google AI Studio에서 결제/요금제(Billing)를 설정하세요."
+        else:
+             summary_text = f"AI 분석 중 오류가 발생했습니다: {error_msg}."
+        
     return {
-        "title": "API 연결 대기중: 시장 데이터 수신 불가",
-        "summary": "현재 Gemini API 키가 설정되지 않아 AI 브리핑을 생성할 수 없습니다. .env 파일을 확인해주세요. 기본적으로 시장은 기술주 중심으로 혼조세를 보이고 있을 가능성이 높습니다.",
+        "title": "AI 서비스 일시 중단" if error_msg else "API 연결 대기중: 시장 데이터 수신 불가",
+        "summary": summary_text,
         "sentiment_score": 50,
         "sentiment_label": "Neutral",
         "key_term": {
-            "term": "API (Application Programming Interface)",
-            "definition": "운영체제와 응용프로그램 사이의 통신에 사용되는 언어나 메시지 형식을 말합니다."
+            "term": "System Error" if error_msg else "API (Application Programming Interface)",
+            "definition": "서비스 일시 장애 상태입니다." if error_msg else "운영체제와 응용프로그램 사이의 통신에 사용되는 언어나 메시지 형식을 말합니다."
         }
     }
 
@@ -200,7 +299,7 @@ def compare_stocks(stock1_data: Dict[str, Any], stock2_data: Dict[str, Any]) -> 
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Comparison Error: {e}")
@@ -238,7 +337,7 @@ def analyze_portfolio(allocation: list) -> str:
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=False)
         return response.text
     except Exception as e:
         print(f"Portfolio Analysis Error: {e}")
@@ -246,7 +345,8 @@ def analyze_portfolio(allocation: list) -> str:
 
 def analyze_theme(theme_keyword: str):
     """
-    사용자가 입력한 테마(예: '비만치료제', '온디바이스AI')에 대해
+    사용자가 입력한 테마(예: '비만치료제', '온디바이스AI') 또는 
+    일상 표현(예: '요즘 너무 더워', '전쟁나면 어떡해')에 대해
     관련 종목과 핵심 이슈를 정리해줍니다.
     """
     if not API_KEY:
@@ -260,17 +360,18 @@ def analyze_theme(theme_keyword: str):
     model = get_json_model()
     
     prompt = f"""
-    Analyze the investment theme: "{theme_keyword}".
+    Analyze the investment theme or user's daily life context: "{theme_keyword}".
     
     Instructions:
-    1. Briefly explain what this theme is about and why it's trending (Korean).
-    2. Identify 3 'Leading Stocks' (Global or Korean, mix is fine). Provide Symbol and Name.
-    3. Identify 3 'Follower/Related Stocks'.
-    4. Provide a 'Risk Factor' for this theme.
+    1. If the input is a daily situation (e.g., "It's too hot", "I'm hungry"), interpret it into investment themes (e.g., "Hot -> Air Conditioner/Ice Cream", "Hungry -> Food Sectors").
+    2. Briefly explain what this theme is about and why it's trending (Korean).
+    3. Identify 3 'Leading Stocks' (Global or Korean, mix is fine). Provide Symbol and Name.
+    4. Identify 3 'Follower/Related Stocks'.
+    5. Provide a 'Risk Factor' for this theme.
     
     Response Format (JSON):
     {{
-        "theme": "{theme_keyword}",
+        "theme": "Interpreted Theme Name (e.g., Summer Season Stocks)",
         "description": "Theme definition and momentum reason (Korean)...",
         "risk_factor": "One major risk (Korean)...",
         "leaders": [
@@ -285,11 +386,22 @@ def analyze_theme(theme_keyword: str):
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Theme Analysis Error: {e}")
-        return None
+        # Fallback Mock Data on Error
+        return {
+            "theme": theme_keyword,
+            "description": f"AI 분석 중 오류가 발생하여 기본 정보를 제공합니다. ({str(e)})",
+            "risk_factor": "데이터 수신 불안정",
+            "leaders": [
+                {"symbol": "NVDA", "name": "NVIDIA", "reason": "AI 대표주 (Fallback)"},
+                {"symbol": "MSFT", "name": "Microsoft", "reason": "AI 플랫폼 (Fallback)"},
+                {"symbol": "005930.KS", "name": "삼성전자", "reason": "반도체 (Fallback)"}
+            ],
+            "followers": []
+        }
 
     """
     뉴스 목록을 받아 숏폼(TikTok/Shorts style)용 3줄 요약 목록을 생성합니다.
@@ -336,7 +448,7 @@ def analyze_earnings_impact(symbol: str, news_list: list) -> Dict[str, Any]:
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Earnings Analysis Error: {e}")
@@ -374,28 +486,63 @@ def analyze_supply_chain(symbol: str) -> Dict[str, Any]:
     2. Define relationships (Supply, Sales, Compete).
     3. Output graph data compatible with network visualization.
     4. Provide a 'Supply Chain Summary' in Korean.
+    5. IMPORTANT: Translate the 'label' of the node groups to Korean if possible.
+    6. **CRITICAL**: Provide the Stock Ticker for each company if public (e.g., "AAPL", "005930.KS"). If private, leave ticker empty.
 
     Response Format (JSON):
     {{
         "symbol": "{symbol}",
         "nodes": [
-            {{"id": "{symbol}", "group": "target", "label": "{symbol}"}},
-            {{"id": "TSMC", "group": "supplier", "label": "TSMC"}},
-            {{"id": "Apple", "group": "customer", "label": "Apple"}},
-            {{"id": "AMD", "group": "competitor", "label": "AMD"}}
+            {{"id": "{symbol}", "group": "target", "label": "{symbol}", "ticker": "{symbol}"}},
+            {{"id": "TSMC", "group": "supplier", "label": "TSMC", "ticker": "TSM"}},
+            {{"id": "Apple", "group": "customer", "label": "Apple", "ticker": "AAPL"}},
+            {{"id": "AMD", "group": "competitor", "label": "AMD", "ticker": "AMD"}}
         ],
         "links": [
             {{"source": "TSMC", "target": "{symbol}", "value": "Foundry"}},
             {{"source": "{symbol}", "target": "Apple", "value": "GPU Sales"}},
             {{"source": "{symbol}", "target": "AMD", "value": "Competition"}}
         ],
-        "summary": "Korean summary of the supply chain risks and structure..."
+        "summary": "Korean summary..."
     }}
     """
     
     try:
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
+        response = generate_with_retry(prompt, json_mode=True)
+        data = json.loads(response.text)
+
+        # [New] Enrich with Real-time Stock Data
+        import yfinance as yf
+        for node in data.get("nodes", []):
+            ticker_sym = node.get("ticker")
+            if ticker_sym:
+                try:
+                    # Clean ticker (sometimes AI gives 'Kr:005930')
+                    if ":" in ticker_sym:
+                         ticker_sym = ticker_sym.split(":")[-1]
+                    
+                    # Korean ticker correction logic
+                    if ticker_sym.isdigit() and len(ticker_sym) == 6:
+                         ticker_sym += ".KS" # Default to KOSPI
+                    
+                    yt = yf.Ticker(ticker_sym)
+                    price = yt.fast_info.last_price
+                    prev = yt.fast_info.previous_close
+                    
+                    if price and prev:
+                        change = ((price - prev) / prev) * 100
+                        
+                        # Currency symbol
+                        curr = "₩" if ".KS" in ticker_sym or ".KQ" in ticker_sym else "$"
+                        
+                        node["price_display"] = f"{curr}{price:,.0f}" if curr == "₩" else f"{curr}{price:,.2f}"
+                        node["change_display"] = f"{change:+.2f}%"
+                        node["change_value"] = change # For color coding
+                except:
+                    pass # Ignore if ticker is invalid or data fetch fails
+
+        return data
+
     except Exception as e:
         print(f"Supply Chain Analysis Error: {e}")
         return None
@@ -415,11 +562,29 @@ def analyze_chart_patterns(symbol: str) -> Dict[str, Any]:
             "summary": "API 키 미설정"
         }
 
-    # 간단한 가격 데이터 가져오기 (문맥 제공용)
+    # 한글 종목명 등 URL 디코딩 및 정규화
+    import urllib.parse
+    symbol = urllib.parse.unquote(symbol)
+
+    # 6자리 숫자만 있는 경우 한국 주식(.KS)으로 간주 (yfinance용 처리)
+    if symbol.isdigit() and len(symbol) == 6:
+        symbol = f"{symbol}.KS"
+
+    # 간단한 가격 데이터 가져오기 (문맥 제공용 & 차트 그리기용)
+    history_data = []
     try:
         import yfinance as yf
+        # 3개월치 데이터 가져오기 (차트 시각화용)
         hist = yf.Ticker(symbol).history(period="3mo")
-        closes = hist['Close'].tolist()[-20:] # 최근 20일 데이터만
+        
+        # DataFrame을 리스트로 변환
+        for date, row in hist.iterrows():
+            history_data.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "price": round(row['Close'], 2)
+            })
+            
+        closes = hist['Close'].tolist()[-20:] # AI에게는 최근 20일 데이터만 제공 (토큰 절약)
         price_str = str(closes)
     except:
         price_str = "Data unavailable"
@@ -431,7 +596,7 @@ def analyze_chart_patterns(symbol: str) -> Dict[str, Any]:
     Recent 20 days closing prices: {price_str}
 
     Instructions:
-    1. Identify the dominant 'Chart Pattern' (e.g., Double Bottom, Head & Shoulders, Bull Flag, Uptrend).
+    1. Identify the dominant 'Chart Pattern' (e.g., Double Bottom, Head & Shoulders, Bull Flag, Uptrend). Please provide the pattern name in Korean (e.g., "이중 바닥형", "상승 깃발형").
     2. Determine key 'Support' and 'Resistance' levels (Approximation).
     3. Give a 'Trading Signal' (Buy / Sell / Hold).
     4. Provide a 'Confidence Score' (0-100).
@@ -439,7 +604,7 @@ def analyze_chart_patterns(symbol: str) -> Dict[str, Any]:
 
     Response Format (JSON):
     {{
-        "pattern": "Bull Flag",
+        "pattern": "상승 깃발형",
         "signal": "Buy",
         "confidence": 85,
         "support": 150.5,
@@ -448,9 +613,36 @@ def analyze_chart_patterns(symbol: str) -> Dict[str, Any]:
     }}
     """
     
+    # 통화 기호 결정
+    currency_symbol = "$"
+    if symbol.endswith(".KS") or symbol.endswith(".KQ"):
+        currency_symbol = "₩"
+
     try:
-        response = model.generate_content(prompt)
-        return json.loads(response.text)
+        response = generate_with_retry(prompt, json_mode=True)
+        result = json.loads(response.text)
+        
+        # [New] 패턴 이름 한글화 (fallback)
+        pattern_map = {
+            "Uptrend": "상승 추세", "Downtrend": "하락 추세",
+            "Bull Flag": "상승 깃발형", "Bear Flag": "하락 깃발형",
+            "Double Bottom": "이중 바닥형", "Double Top": "이중 천장형",
+            "Head & Shoulders": "헤드 앤 숄더", "Inverse Head & Shoulders": "역헤드 앤 숄더",
+            "Rectangle": "박스권", "Triangle": "삼각형 패턴",
+            "Wedge": "쐐기형", "Channel": "채널형"
+        }
+        
+        # AI가 영어를 반환했을 경우 매핑 시도
+        pat = result.get("pattern", "")
+        for eng, kor in pattern_map.items():
+            if eng.lower() in pat.lower():
+                result["pattern"] = kor
+                break
+
+        result['currency'] = currency_symbol
+        result['symbol'] = symbol 
+        result['history'] = history_data # [New] 차트 데이터 추가
+        return result
     except Exception as e:
         print(f"Chart Analysis Error: {e}")
         return None
@@ -494,7 +686,7 @@ def analyze_trading_log(log_text: str) -> Dict[str, Any]:
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Trading Coach Error: {e}")
@@ -608,7 +800,7 @@ def track_insider_trading(symbol: str) -> Dict[str, Any]:
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Insider Analysis Error: {e}")
@@ -684,7 +876,7 @@ def analyze_market_weather() -> Dict[str, Any]:
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
          # 에러 시 fallback
@@ -728,13 +920,13 @@ def calculate_delisting_risk(symbol: str) -> Dict[str, Any]:
         Total Debt: {total_debt}
         Total Equity: {total_equity}
         Debt Ratio: {debt_ratio:.2f}%
-        Latest Net Income: {net_income}
-        Latest Operating Income: {operating_income}
+        Net Income: {net_income}
+        Operating Income: {operating_income}
         """
         
     except Exception as e:
-        print(f"Financial Data Error: {e}")
-        financial_summary = f"Symbol: {symbol} (Financial Data Fetch Failed)"
+        print(f"Delisting Check Error: {e}")
+        financial_summary = f"Symbol: {symbol} (Financial Data unavailable)"
 
     model = get_json_model()
     
@@ -762,8 +954,65 @@ def calculate_delisting_risk(symbol: str) -> Dict[str, Any]:
     """
     
     try:
-        response = model.generate_content(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         return json.loads(response.text)
     except Exception as e:
         print(f"Risk Analysis Error: {e}")
         return None
+
+def diagnose_portfolio_health(portfolio_items: list[str]) -> Dict[str, Any]:
+    """
+    사용자의 보유 종목 리스트를 받아 포트폴리오 건강 상태를 진단합니다.
+    (예: "삼성전자, TSLA, NVDA")
+    """
+    if not API_KEY:
+        return {
+            "score": 60,
+            "diagnosis": "API 키 미설정 (검진 불가)",
+            "prescription": "정밀 진단을 위해 API 키를 설정해주세요.",
+            "details": {
+                "sector_risk": "Unknown",
+                "diversification": "Unknown"
+            }
+        }
+        
+    portfolio_str = ", ".join(portfolio_items)
+    
+    model = get_json_model()
+    
+    prompt = f"""
+    You are a 'Stock Portfolio Doctor'.
+    Patient's Portfolio: [{portfolio_str}]
+    
+    Instructions:
+    1. Analyze the diversification and risk of this portfolio.
+    2. Assign a 'Health Score' (0-100).
+       - < 50: Sick (Too risky or concentrated)
+       - 50-75: Average (Needs care)
+       - > 75: Healthy (Well balanced)
+    3. provide a 'Diagnosis' using a medical metaphor (e.g., 'High Risk Obesity', 'Tech Addiction', 'Anemia').
+    4. Provide a 'Prescription' (Actionable advice, e.g., "Take some Vitamin D (Dividend stocks)").
+    
+    Response Format (JSON):
+    {{
+        "score": 65,
+        "diagnosis": "Technical Sector Obesity (Korean)",
+        "prescription": "Add defensive stocks like ... (Korean)",
+        "details": {{
+            "sector_bias": "Heavily skewed to Tech (Korean)",
+            "risk_level": "High/Medium/Low"
+        }}
+    }}
+    """
+    
+    try:
+        response = generate_with_retry(prompt, json_mode=True)
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"Portfolio Diagnosis Error: {e}")
+        return {
+            "score": 0,
+            "diagnosis": "진단 실패",
+            "prescription": "오류가 발생했습니다.",
+            "details": {}
+        }

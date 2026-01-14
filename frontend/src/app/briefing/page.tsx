@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Header from "@/components/Header";
-import { BookOpen, Globe, TrendingUp, PlayCircle, Loader2, ExternalLink } from "lucide-react";
+import { BookOpen, Globe, TrendingUp, Loader2, ExternalLink } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
 import Typewriter from "@/components/Typewriter";
 
@@ -35,7 +35,7 @@ export default function BriefingPage() {
     const [news, setNews] = useState<NewsItem[]>([]);
     const [marketIndices, setMarketIndices] = useState<MarketIndex[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isPlaying, setIsPlaying] = useState(false);
+
     const [today, setToday] = useState("");
 
     useEffect(() => {
@@ -63,40 +63,10 @@ export default function BriefingPage() {
 
         fetchData();
 
-        // Cleanup TTS on unmount
-        return () => {
-            window.speechSynthesis.cancel();
-        };
+
     }, []);
 
-    const playBriefing = () => {
-        if (!briefing) return;
 
-        if (isPlaying) {
-            window.speechSynthesis.cancel();
-            setIsPlaying(false);
-            return;
-        }
-
-        const text = `
-            ${today} AI 투자 브리핑입니다.
-            ${briefing.title}.
-            ${briefing.summary}
-            현재 시장 심리는 ${briefing.sentiment_label} 상태이며, 점수는 ${briefing.sentiment_score}점입니다.
-            오늘의 용어는 ${briefing.key_term.term}, ${briefing.key_term.definition} 입니다.
-            이상 AI 브리핑이었습니다. 성공적인 투자를 기원합니다.
-        `;
-
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ko-KR';
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
-
-        utterance.onend = () => setIsPlaying(false);
-
-        window.speechSynthesis.speak(utterance);
-        setIsPlaying(true);
-    };
 
     if (loading) {
         return (
@@ -115,8 +85,8 @@ export default function BriefingPage() {
 
 
             <div className="p-6 max-w-7xl mx-auto space-y-8">
-                {/* Market Indices Ticker */}
-                <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+                {/* Market Indices Ticker - Hidden as requested */}
+                <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide hidden">
                     {marketIndices.map((idx, index) => (
                         <div key={index} className="flex-shrink-0 bg-white/5 border border-white/10 rounded-xl px-6 py-3 min-w-[140px] flex flex-col items-center">
                             <span className="text-xs text-gray-400 font-bold mb-1">{idx.label}</span>
@@ -154,20 +124,7 @@ export default function BriefingPage() {
                             </p>
                         </div>
 
-                        <button
-                            onClick={playBriefing}
-                            className={`mt-8 flex items-center gap-2 bg-white text-black px-6 py-3 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${isPlaying ? 'bg-red-100' : 'hover:bg-gray-200'}`}
-                        >
-                            {isPlaying ? (
-                                <>
-                                    <Loader2 className="w-5 h-5 animate-spin" /> 재생 중... (클릭하여 정지)
-                                </>
-                            ) : (
-                                <>
-                                    <PlayCircle className="w-5 h-5" /> 오디오 요약 듣기 (TTS)
-                                </>
-                            )}
-                        </button>
+
                     </div>
                 </div>
 

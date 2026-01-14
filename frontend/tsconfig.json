@@ -39,6 +39,8 @@
     ".next_custom/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "android",
+    "ios"
   ]
 }
