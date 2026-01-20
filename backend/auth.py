@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from db_manager import create_user_if_not_exists
+from db_manager import create_user_if_not_exists, decrement_free_trial
 import time
 
 router = APIRouter()
@@ -11,6 +11,9 @@ class GoogleLoginRequest(BaseModel):
     email: str
     name: str = "User"
     picture: str = ""
+
+class UseTrialRequest(BaseModel):
+    user_id: str
 
 @router.post("/auth/google")
 def google_login(req: GoogleLoginRequest):
@@ -45,3 +48,15 @@ def google_login(req: GoogleLoginRequest):
         "user": real_user,
         "token": f"mock_token_{req.id}_{int(time.time())}" # Simulation
     }
+
+@router.post("/auth/use-trial")
+def use_trial(req: UseTrialRequest):
+    """
+    1시간 무료 이용권 사용 API
+    """
+    new_count = decrement_free_trial(req.user_id)
+    
+    if new_count >= 0:
+        return {"status": "success", "new_count": new_count}
+    else:
+        return {"status": "error", "message": "No trials left or user not found"}

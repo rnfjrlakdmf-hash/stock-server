@@ -363,23 +363,28 @@ def analyze_theme(theme_keyword: str):
     Analyze the investment theme or user's daily life context: "{theme_keyword}".
     
     Instructions:
-    1. If the input is a daily situation (e.g., "It's too hot", "I'm hungry"), interpret it into investment themes (e.g., "Hot -> Air Conditioner/Ice Cream", "Hungry -> Food Sectors").
+    1. If the input is a daily situation (e.g., "It's too hot"), interpret it into investment themes.
     2. Briefly explain what this theme is about and why it's trending (Korean).
-    3. Identify 3 'Leading Stocks' (Global or Korean, mix is fine). Provide Symbol and Name.
-    4. Identify 3 'Follower/Related Stocks'.
-    5. Provide a 'Risk Factor' for this theme.
+    3. Identify 5 'Leading Stocks' (대장주) related to this theme.
+       - **PRIORITIZE KOREAN STOCKS** (KOSPI/KOSDAQ) if possible.
+       - If Korean stocks are not available, use Global leaders.
+       - **IMPORTANT**: For Korean stocks, the Symbol MUST include the suffix '.KS' (KOSPI) or '.KQ' (KOSDAQ). Example: '005930.KS', '035720.KQ'.
+    4. Identify 5 'Related Stocks' (Followers/관련주) that might follow the trend.
+       - Same rules apply for symbols.
+    5. Provide 'Symbol', 'Name', and a brief 'Reason' (Korean) for both lists.
+    6. Provide a 'Risk Factor' for this theme.
     
     Response Format (JSON):
     {{
-        "theme": "Interpreted Theme Name (e.g., Summer Season Stocks)",
+        "theme": "Interpreted Theme Name",
         "description": "Theme definition and momentum reason (Korean)...",
         "risk_factor": "One major risk (Korean)...",
         "leaders": [
-            {{"symbol": "LLY", "name": "Eli Lilly", "reason": "Market leader in GLP-1..."}},
+            {{"symbol": "...", "name": "...", "reason": "..."}},
             ...
         ],
         "followers": [
-            {{"symbol": "NVO", "name": "Novo Nordisk", "reason": "..."}},
+            {{"symbol": "...", "name": "...", "reason": "..."}},
             ...
         ]
     }}

@@ -48,8 +48,9 @@ export default function SentimentBattle({ symbol, aiScore }: SentimentBattleProp
     if (!voteStats) return null;
 
     // AI Prediction: Score > 50 means UP
-    const aiPrediction = aiScore >= 50 ? 'UP' : 'DOWN';
-    const aiConfidence = Math.abs(aiScore - 50) * 2; // 50->0%, 100->100%
+    const safeScore = typeof aiScore === 'number' ? aiScore : 50;
+    const aiPrediction = safeScore >= 50 ? 'UP' : 'DOWN';
+    const aiConfidence = Math.abs(safeScore - 50) * 2; // 50->0%, 100->100%
 
     return (
         <div className="bg-black/40 border border-white/10 rounded-3xl p-6 relative overflow-hidden">

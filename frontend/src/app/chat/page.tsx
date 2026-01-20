@@ -146,8 +146,8 @@ export default function ChatPage() {
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="메시지를 입력하세요 (Shift + Enter for new line)..."
-                        className="w-full bg-black/60 border border-white/20 rounded-2xl pl-6 pr-16 py-4 outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all shadow-xl"
+                        placeholder="궁금한 걸 물어보세요..."
+                        className="w-full bg-black/60 border border-white/20 rounded-2xl pl-4 pr-14 py-3 md:py-4 text-sm md:text-base outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all shadow-xl placeholder-gray-500"
                         disabled={loading}
                     />
                     <button
@@ -155,7 +155,7 @@ export default function ChatPage() {
                         disabled={!input.trim() || loading}
                         className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl text-white hover:opacity-90 disabled:opacity-50 transition-all active:scale-95"
                     >
-                        <Send className="w-5 h-5" />
+                        <Send className="w-4 h-4 md:w-5 md:h-5" />
                     </button>
                 </div>
             </div>

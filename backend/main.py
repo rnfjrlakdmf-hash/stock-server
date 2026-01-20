@@ -68,59 +68,37 @@ def read_prediction_report():
     return {"status": "success", "data": report}
 
 @app.get("/api/stock/{symbol}")
-def read_stock(symbol: str):
+def read_stock(symbol: str, skip_ai: bool = False):
+    import urllib.parse
     # URL 인코딩 해제 (한글 종목명 처리)
     symbol = urllib.parse.unquote(symbol).strip()
     data = get_stock_info(symbol)
-    if data:
-        # AI 분석 실행 (MARKET 심볼은 이미 get_stock_info에서 처리됨)
-        if data["symbol"] != "MARKET":
-            ai_result = analyze_stock(data)
-            
-            # 분석 결과를 기존 데이터에 병합 (점수, 코멘트 업데이트)
-            data.update({
-                "score": ai_result.get("score", 50),
-                "metrics": ai_result.get("metrics", {"supplyDemand": 50, "financials": 50, "news": 50}),
-                "summary": ai_result.get("analysis_summary", data["summary"]),
-                "strategy": ai_result.get("strategy", {}),   # New
-                "rationale": ai_result.get("rationale", {}),  # New
-                "related_stocks": ai_result.get("related_stocks", []) # New
-            })
-            
-        
-            # [New] 관련 종목 실시간 시세 업데이트 (AI가 심볼만 주므로 가격은 따로 조회)
-            if "related_stocks" in data:
-                for item in data["related_stocks"]:
-                    try:
-                        # AI may give symbols like "005930" without .KS, or "AAPL"
-                        sym = item.get("symbol")
-                        # Basic fix for Korean codes if extension missing
-                        if sym and sym.isdigit() and len(sym) == 6:
-                            sym += ".KS"
-                            
-                        q = get_simple_quote(sym)
-                        if q:
-                            item["price"] = q["price"]
-                            item["change"] = q["change"]
-                        else:
-                            item["price"] = "-"
-                            item["change"] = "-"
-                    except:
-                        item["price"] = "-"
-                        item["change"] = "-"
 
-            # [New] AI 번역 뉴스가 있으면 원본 뉴스 업데이트
-            t_news = ai_result.get("translated_news", [])
-            if t_news:
-                # 원본 뉴스 리스트 순서와 AI가 처리한 순서가 같다고 가정 (Top 5)
-                for i, news_item in enumerate(data.get("news", [])):
-                    if i < len(t_news):
-                        # 한글 제목 및 요약 적용
-                        news_item["title"] = t_news[i].get("title", news_item["title"])
-                        news_item["summary"] = t_news[i].get("summary", "") # 요약 필드 추가 (프론트에서 보여줄 수 있음)
-        
-        # [New] 분석 결과 DB 저장 (히스토리용)
-        save_analysis_result(data)
+    if data:
+        # AI 분석 실행 (skip_ai가 False이고, MARKET이 아닐 때만)
+        if not skip_ai and data["symbol"] != "MARKET":
+            try:
+                ai_result = analyze_stock(data)
+                
+                # 분석 결과를 기존 데이터에 병합 (점수, 코멘트 업데이트)
+                data.update({
+                    "score": ai_result.get("score", 50),
+                    "metrics": ai_result.get("metrics", {"supplyDemand": 50, "financials": 50, "news": 50}),
+                    "summary": ai_result.get("analysis_summary", data["summary"]),
+                    "strategy": ai_result.get("strategy", {}),
+                    "rationale": ai_result.get("rationale", {}),
+                    "related_stocks": ai_result.get("related_stocks", [])
+                })
+            except Exception as e:
+                print(f"AI Analysis Failed: {e}")
+                # AI 분석 실패해도 기본 데이터는 반환
+
+        # 분석 결과 DB 저장 (히스토리용)
+        # AI 분석을 안 했으면(skip_ai=True) 저장을 할지 말지 결정해야 하는데, 
+        # 일단은 읽기 전용이므로 저장 안 하거나, 점수 없이 저장될 수 있음. 
+        # 여기서는 skip_ai=False일 때만 저장하는 게 맞아 보이나, 기존 로직 유지.
+        if not skip_ai:
+            save_analysis_result(data)
         
         return {"status": "success", "data": data}
     else:
@@ -189,9 +167,34 @@ def create_alert(req: AlertRequest):
 
 @app.get("/api/theme/{keyword}")
 def read_theme(keyword: str):
-    """테마 키워드 분석"""
+    """테마 키워드 분석 (실시간 시세 포함)"""
     result = analyze_theme(keyword)
+    
     if result:
+        # [New] 대장주(Leaders) 및 관련주(Followers) 실시간 시세 업데이트
+        all_stocks = result.get("leaders", []) + result.get("followers", [])
+        
+        for stock in all_stocks:
+            try:
+                sym = stock.get("symbol")
+                if sym:
+                    # 기호 보정 (AI가 가끔 이상하게 줄 때 대비)
+                    if sym.isdigit() and len(sym) == 6:
+                        sym += ".KS"
+                        
+                    q = get_simple_quote(sym)
+                    if q:
+                        stock["price"] = q.get("price", "N/A")
+                        stock["change"] = q.get("change", "0")
+                        # change_percent가 있다면 사용, 없으면 change 문자열에서 추출 시도
+                        stock["change_percent"] = q.get("change_percent", "0%") 
+                    else:
+                        stock["price"] = "-"
+                        stock["change"] = "-"
+            except Exception as e:
+                stock["price"] = "-"
+                stock["change"] = "-"
+
         return {"status": "success", "data": result}
     else:
         return {"status": "error", "message": "Failed to analyze theme"}
@@ -402,6 +405,8 @@ def read_korea_indices():
          print(f"Indices Fetch Error: {e}")
          return {"status": "error", "message": "Failed to fetch indices", "data": {}}
 
+
+
 @app.get("/api/korea/sectors")
 def read_korea_sectors():
     """한국 증시: 업종 및 테마 상위 데이터만 반환"""
@@ -420,6 +425,19 @@ def read_korea_sectors():
     except Exception as e:
         print(f"Sectors Fetch Error: {e}")
         return {"status": "error", "message": "Failed to fetch sectors", "data": {}}
+
+@app.get("/api/korea/chart/{symbol}")
+def get_korea_chart(symbol: str):
+    from korea_data import get_index_chart_data
+    data = get_index_chart_data(symbol)
+    return {"status": "success", "data": data}
+
+@app.get("/api/stock/chart/{symbol}")
+def get_stock_chart(symbol: str):
+    from stock_data import get_stock_chart_data
+    # 기본은 1일치 5분봉
+    data = get_stock_chart_data(symbol, period="1d", interval="5m")
+    return {"status": "success", "data": data}
 
 @app.get("/api/korea/investors")
 def read_korea_investors():
@@ -611,7 +629,8 @@ def read_closing_summary():
     # 한국장: 평일 15:40 이후 / 미국장: 평일 06:10 이후
     # 여기서는 데이터만 주면 프론트가 판단하도록 함
     
-    watchlist = get_watchlist()
+    # [Fixed] Missing user_id argument error. Defaulting to 'guest' for banner.
+    watchlist = get_watchlist("guest")
     if not watchlist:
         return {"status": "empty", "data": []}
         

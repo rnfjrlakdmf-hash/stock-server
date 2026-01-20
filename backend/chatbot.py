@@ -132,20 +132,55 @@ def chat_with_ai(message: str) -> str:
         except Exception as e:
             print(f"Theme lookup failed: {e}")
 
+    # [New] 종합 시장 데이터 조회 (질문이 광범위하거나 시장 전반을 물을 때)
+    # 키워드: 증시, 시장, 오늘, 지수, 환율, 브리핑, 상황, 어때
+    general_keywords = ["증시", "시장", "오늘", "지수", "환율", "브리핑", "상황", "어때", "흐름", "경제"]
+    if any(k in message for k in general_keywords) or not market_context:
+        try:
+            from stock_data import get_all_assets
+            from korea_data import get_live_investor_estimates
+            
+            # 1. 자산 시세 (지수, 환율 등)
+            assets = get_all_assets()
+            market_summary = []
+            
+            if assets.get("Indices"):
+                market_summary.append("== 주요 지수 ==")
+                for idx in assets["Indices"][:5]: # Top 5 Indices
+                    market_summary.append(f"{idx['name']}: {idx['price']} ({idx['change']})")
+            
+            if assets.get("Forex"):
+                market_summary.append("\n== 주요 환율 ==")
+                for fx in assets["Forex"][:3]: # Top 3 Forex
+                    market_summary.append(f"{fx['name']}: {fx['price']} ({fx['change']})")
+
+            # 2. 투자자 동향 (한국 시장 장중인 경우)
+            # 삼성전자 예시로 투자자 동향을 볼 수도 있지만, 전체 시장 동향은 별도 API 필요.
+            # 여기서는 대표적으로 '삼성전자'의 투자자 동향을 참고용으로만 가져오거나(대장주니까), 생략.
+            # get_live_investor_estimates('005930.KS') 활용 가능.
+            
+            if market_summary:
+                briefing = "\n".join(market_summary)
+                market_context += f"\n\n[실시간 시장 브리핑 데이터]\n{briefing}\n(사용자가 증시 전반을 물어보면 이 데이터를 브리핑해주세요)"
+        except Exception as e:
+            print(f"Market Summary fetch failed: {e}")
+
     # 2. 시스템 프롬프트 구성
     system_prompt = f"""
-    당신은 월스트리트 출신의 친절하고 유머러스한 'AI 주식 상담사'입니다.
-    사용자의 주식 투자 관련 질문에 대해 전문적이면서도 쉽게 이해할 수 있도록 답변하세요.
+    당신은 월스트리트 출신의 전설적인 트레이더이자 'AI 주식 상담사'입니다.
+    사용자는 당신을 믿고 의지하는 투자자입니다. 
+    단순한 답변보다는 시장의 흐름과 통찰력(Insight)이 담긴 답변을 제공하세요.
+    모든 데이터는 '실시간' 기준이며, 당신은 이 모든 정보를 이미 알고 있다고 가정하고 자연스럽게 이야기하세요.
     
-    [현재 파악된 시장 데이터]
-    (이 데이터는 실시간 yfinance 조회 결과입니다. 답변 시 이 수치를 적극 활용하세요.)
+    [실시간 시장 데이터 (Fact)]
     {market_context}
 
     지침:
-    1. 사용자가 특정 종목(예: 삼성전자, 테슬라)을 언급했으나 위 '시장 데이터'에 없다면, "실시간 가격 정보를 가져오지 못했지만..." 하고 일반적인 지식을 기반으로 답변하세요.
-    2. 매수/매도 추천을 직접적으로 하지 마세요. 대신 "현재 상황은 ~하므로 긍정적/부정적으로 보입니다" 정도로 의견을 제시하세요.
-    3. 답변은 한국어로, 친근한 말투(해요체)로 작성하세요. 적절한 이모지를 사용하세요.
-    4. 너무 길지 않게 핵심만 3~4문장 내외로 답변하세요.
+    1. 시장 데이터가 있다면 구체적인 수치(지수, 등락률)를 언급하며 분석하세요. (예: "오늘 코스피는 0.5% 상승하며 좋은 흐름이네요.")
+    2. 데이터가 없다면 "현재 실시간 데이터를 가져오는 중 통신이 원활하지 않지만..." 하고 일반적인 뷰를 제시하세요.
+    3. 매수/매도 추천은 "제 개인적인 의견으로는..."이라는 뉘앙스로 조심스럽게 하되, 명확한 근거(재무, 수급 등)를 대세요.
+    4. 답변은 친절하고 전문적인 '해요체'를 사용하세요. 가독성을 위해 불릿 포인트나 줄바꿈을 적절히 쓰세요.
+    5. 사용자가 특정 종목을 물어보면 그 종목에 집중하고, 시장 전체를 물어보면 지수와 환율을 종합적으로 브리핑하세요.
     """
 
     try:

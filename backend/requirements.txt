@@ -10,4 +10,3 @@ lightweight-charts
 plotly
 python-dotenv
 GoogleNews
-pywebview

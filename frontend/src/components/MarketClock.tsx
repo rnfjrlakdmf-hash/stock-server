@@ -19,6 +19,23 @@ const MARKETS: MarketTime[] = [
     { name: "런던 (LSE)", tz: "Europe/London", openHour: 8, openMinute: 0, closeHour: 16, closeMinute: 30 },
 ];
 
+// Basic holidays (YYYY-MM-DD) for Korea (Sample for 2025-2026)
+// In a real app, strict holiday management per country is needed.
+const KR_HOLIDAYS = [
+    "2025-01-01", "2025-01-27", "2025-01-28", "2025-01-29", // New Year, Logunar New Year
+    "2025-03-03", // Independence Day (obs)
+    "2025-05-05", // Children's Day
+    "2025-05-06", // Buddha's Birthday
+    "2025-06-06", // Memorial Day
+    "2025-08-15", // Liberation Day
+    "2025-10-03", // Foundation Day
+    "2025-10-06", // Chuseok (start)
+    "2025-10-07", // Chuseok
+    "2025-10-08", // Chuseok
+    "2025-10-09", // Hangeul Day
+    "2025-12-25", // Christmas
+];
+
 export default function MarketClock() {
     const [times, setTimes] = useState<Record<string, Date>>({});
     const [mounted, setMounted] = useState(false);
@@ -30,9 +47,6 @@ export default function MarketClock() {
             const newTimes: Record<string, Date> = {};
 
             MARKETS.forEach(m => {
-                // Convert current time to target timezone string, then parse it back to a Date object relative to local? 
-                // Actually easier way: use Intl.DateTimeFormat to get parts
-
                 const str = new Intl.DateTimeFormat('en-US', {
                     timeZone: m.tz,
                     year: 'numeric', month: 'numeric', day: 'numeric',
@@ -53,69 +67,63 @@ export default function MarketClock() {
     if (!mounted) return null;
 
     return (
-        <div className="mb-6 space-y-3">
-            <div className="flex items-center gap-2 mb-2 px-1">
-                <Globe className="w-4 h-4 text-blue-400" />
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">세계 증시 시간</span>
+        <div className="mb-4">
+            <div className="flex items-center gap-1.5 mb-2 px-1 opacity-70">
+                <Globe className="w-3 h-3 text-blue-400" />
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Global Time</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
                 {MARKETS.map((m) => {
                     const localTime = times[m.name];
                     if (!localTime) return null;
 
                     const hours = localTime.getHours();
                     const minutes = localTime.getMinutes();
+                    const day = localTime.getDay(); // 0: Sun, 6: Sat
+
                     const totalMinutes = hours * 60 + minutes;
                     const openMinutes = m.openHour * 60 + m.openMinute;
                     const closeMinutes = m.closeHour * 60 + m.closeMinute;
 
-                    const isOpen = totalMinutes >= openMinutes && totalMinutes < closeMinutes;
+                    // 1. Time Check
+                    const isTimeOpen = totalMinutes >= openMinutes && totalMinutes < closeMinutes;
+
+                    // 2. Weekend Check
+                    const isWeekday = day !== 0 && day !== 6;
+
+                    // 3. Holiday Check (Only applying KR logic for now or generic)
+                    // Format localTime to YYYY-MM-DD
+                    const year = localTime.getFullYear();
+                    const month = String(localTime.getMonth() + 1).padStart(2, '0');
+                    const d = String(localTime.getDate()).padStart(2, '0');
+                    const dateStr = `${year}-${month}-${d}`;
+
+                    let isHoliday = false;
+                    if (m.name.includes("KRX")) {
+                        if (KR_HOLIDAYS.includes(dateStr)) isHoliday = true;
+                    }
+                    // Add Logic for US/UK holidays if needed, currently only KR requested context usually
+
+                    const isOpen = isTimeOpen && isWeekday && !isHoliday;
 
                     return (
                         <div
                             key={m.name}
                             className={`
-                                relative flex justify-between items-center p-3 rounded-xl border transition-all duration-300
+                                flex flex-col items-center justify-center p-2 rounded-lg border transition-all
                                 ${isOpen
-                                    ? 'bg-gradient-to-r from-blue-900/30 to-purple-900/10 border-blue-500/30 shadow-lg shadow-blue-900/20'
-                                    : 'bg-white/5 border-white/5 opacity-60 hover:opacity-100'}
+                                    ? 'bg-blue-900/20 border-blue-500/40 shadow shadow-blue-900/20'
+                                    : 'bg-white/5 border-white/5 opacity-60'}
                             `}
                         >
-                            {/* Status Indicator */}
-                            {isOpen && (
-                                <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                                </span>
-                            )}
-
-                            <div className="flex flex-col">
-                                <span className={`text-xs font-bold mb-0.5 ${isOpen ? 'text-white' : 'text-gray-400'}`}>
-                                    {m.name.split(' ')[0]} {/* Show distinct city/exchange name */}
-                                    <span className="text-[10px] opacity-70 ml-1 font-normal">{m.name.split(' ')[1]}</span>
-                                </span>
-                                <span className={`text-[10px] font-bold tracking-wider ${isOpen ? 'text-green-400' : 'text-gray-500'}`}>
-                                    {isOpen ? "현재 개장중" : "장 종료"}
-                                </span>
+                            <span className={`text-[10px] font-bold mb-0.5 ${isOpen ? 'text-blue-300' : 'text-gray-500'}`}>
+                                {m.name.split(' ')[0]}
+                            </span>
+                            <div className={`font-mono font-bold leading-none ${isOpen ? 'text-white text-xs' : 'text-gray-500 text-[10px]'}`}>
+                                {localTime.getHours().toString().padStart(2, '0')}:{localTime.getMinutes().toString().padStart(2, '0')}
                             </div>
-
-                            <div className="text-right flex flex-col items-end">
-                                <div className={`font-mono font-bold tracking-tight ${isOpen ? 'text-xl text-white' : 'text-lg text-gray-500'} flex items-baseline justify-end gap-0.5 leading-none`}>
-                                    <span>
-                                        {localTime.getHours() % 12 || 12}:{localTime.getMinutes().toString().padStart(2, '0')}
-                                    </span>
-                                    <span className="text-[10px] opacity-60">
-                                        :{localTime.getSeconds().toString().padStart(2, '0')}
-                                    </span>
-                                    <span className="text-[10px] font-sans ml-1 opacity-80 font-medium">
-                                        {localTime.getHours() >= 12 ? '오후' : '오전'}
-                                    </span>
-                                </div>
-                                <span className={`text-[10px] font-bold uppercase mt-1 ${isOpen ? 'text-blue-300' : 'text-gray-600'}`}>
-                                    {localTime.toLocaleDateString('ko-KR', { weekday: 'long' })}
-                                </span>
-                            </div>
+                            {isOpen && <div className="w-1 h-1 rounded-full bg-green-500 mt-1 animate-pulse" />}
                         </div>
                     );
                 })}

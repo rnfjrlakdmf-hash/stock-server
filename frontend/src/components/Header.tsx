@@ -85,26 +85,22 @@ export default function Header({ title = "대시보드", subtitle = "환영합�
     return (
         <header className="flex flex-col md:flex-row items-center justify-between p-6 border-b border-white/5 bg-black/40 backdrop-blur-md sticky top-0 z-50 transition-all duration-200">
             <div className="flex items-center gap-8 w-full md:w-auto mb-4 md:mb-0">
-                <div>
-                    <h1 className="text-2xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-                        ANTIGRAVITY
+                <div className="flex flex-col">
+                    <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight">
+                        {title}
                     </h1>
-                    <p className="text-xs text-gray-400 font-mono tracking-widest uppercase">AI Stock Analyst</p>
+                    {subtitle && (
+                        <p className="text-xs md:text-sm text-gray-400 font-medium hidden md:block">
+                            {subtitle}
+                        </p>
+                    )}
                 </div>
 
                 {/* Navigation moved to Sidebar */}
             </div>
 
-            <div className="flex items-center gap-4 w-full md:w-auto">
-                <div className="relative group w-full md:w-auto">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 group-focus-within:text-blue-400 transition-colors" />
-                    <input
-                        type="text"
-                        placeholder="종목 검색 (예: AAPL)..."
-                        onKeyDown={handleKeyDown}
-                        className="h-10 w-full md:w-64 rounded-xl bg-white/5 pl-10 pr-4 text-sm outline-none ring-1 ring-white/10 transition-all focus:ring-2 focus:ring-blue-500/50 focus:bg-white/10 text-gray-200 placeholder-gray-500"
-                    />
-                </div>
+            <div className="flex items-center gap-4 w-full md:w-auto justify-end">
+                {/* Search Bar Removed as per user request */}
 
                 <div className="flex items-center gap-2">
                     <button className="relative rounded-xl bg-white/5 p-2.5 transition-colors hover:bg-white/10 hover:text-blue-400 border border-white/5">

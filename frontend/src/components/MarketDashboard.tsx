@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, TrendingUp, DollarSign, Droplet, Globe, BarChart3, ArrowUpRight, ArrowDownRight, Layers, AlertCircle, RefreshCw, PieChart, Activity } from "lucide-react";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { API_BASE_URL } from "@/lib/config";
 import { FALLBACK_DASHBOARD_DATA } from "@/lib/fallbackData";
 import MarketIndicators from './MarketIndicators';
@@ -216,15 +217,15 @@ export default function MarketDashboard({ onSearch, onPrefetch }: MarketDashboar
                             <button
                                 key={key}
                                 onClick={() => setActiveTab(key as any)}
-                                className={`flex-1 p-4 flex flex-col items-center justify-center transition-all hover:bg-white/5 ${isActive ? 'bg-white/10' : ''}`}
+                                className={`flex-1 p-2 md:p-4 flex flex-col items-center justify-center transition-all hover:bg-white/5 ${isActive ? 'bg-white/10' : ''}`}
                             >
-                                <span className={`text-sm font-bold mb-1 ${isActive ? 'text-white' : 'text-gray-400'}`}>{label}</span>
+                                <span className={`text-xs md:text-base font-bold mb-1 whitespace-nowrap ${isActive ? 'text-white' : 'text-gray-400'}`}>{label}</span>
                                 {item ? (
                                     <>
-                                        <span className={`text-lg font-bold font-mono ${item.percent.includes('+') ? 'text-red-500' : item.percent.includes('-') ? 'text-blue-500' : 'text-white'}`}>
-                                            {item.value}
+                                        <span className={`text-sm md:text-2xl font-bold font-mono ${item.percent.includes('+') ? 'text-red-500' : item.percent.includes('-') ? 'text-blue-500' : 'text-white'}`}>
+                                            {Number(String(item.value).replace(/,/g, '')).toLocaleString()}
                                         </span>
-                                        <div className={`text-xs flex gap-1 ${item.percent.includes('+') ? 'text-red-400' : item.percent.includes('-') ? 'text-blue-400' : 'text-gray-500'}`}>
+                                        <div className={`text-[10px] md:text-sm flex flex-col md:flex-row gap-0.5 md:gap-1 mt-1 items-center ${item.percent.includes('+') ? 'text-red-400' : item.percent.includes('-') ? 'text-blue-400' : 'text-gray-500'}`}>
                                             <span>{item.change}</span>
                                             <span>{item.percent}</span>
                                         </div>
@@ -241,24 +242,33 @@ export default function MarketDashboard({ onSearch, onPrefetch }: MarketDashboar
                 {summary ? (
                     <div className="p-6">
                         {/* Investors Legend */}
-                        <div className="flex justify-center md:justify-end gap-6 mb-4 text-sm">
-                            <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                                <span className="text-gray-400">개인</span>
+                        {/* Investors Legend */}
+                        <div className="flex justify-between items-center mb-4 text-xs md:text-sm px-2 bg-black/20 rounded-lg py-2">
+                            <div className="flex flex-col items-center">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                                    <span className="text-gray-400">개인</span>
+                                </div>
                                 <span className={`font-mono font-bold ${!summary.investors?.personal.includes('-') ? 'text-red-400' : 'text-blue-400'}`}>
                                     {summary.investors?.personal}
                                 </span>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                <span className="text-gray-400">외국인</span>
+                            <div className="h-6 w-px bg-white/10"></div>
+                            <div className="flex flex-col items-center">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                                    <span className="text-gray-400">외국인</span>
+                                </div>
                                 <span className={`font-mono font-bold ${!summary.investors?.foreigner.includes('-') ? 'text-red-400' : 'text-blue-400'}`}>
                                     {summary.investors?.foreigner}
                                 </span>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                                <span className="text-gray-400">기관</span>
+                            <div className="h-6 w-px bg-white/10"></div>
+                            <div className="flex flex-col items-center">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                    <span className="text-gray-400">기관</span>
+                                </div>
                                 <span className={`font-mono font-bold ${!summary.investors?.institutional.includes('-') ? 'text-red-400' : 'text-blue-400'}`}>
                                     {summary.investors?.institutional}
                                 </span>
@@ -266,12 +276,9 @@ export default function MarketDashboard({ onSearch, onPrefetch }: MarketDashboar
                         </div>
 
                         {/* Chart */}
-                        <div className="h-64 bg-white/5 rounded-xl border border-white/5 mb-6 overflow-hidden relative flex items-center justify-center">
-                            {summary.chart ? (
-                                <img src={summary.chart} alt="Chart" className="w-full h-full object-contain p-2" />
-                            ) : (
-                                <span className="text-gray-500 text-sm">차트 준비중</span>
-                            )}
+                        {/* Chart (Recharts) */}
+                        <div className="h-64 bg-white/5 rounded-xl border border-white/5 mb-6 overflow-hidden relative flex items-center justify-center p-2">
+                            <LiveChart symbol={activeTab} />
                         </div>
 
                         {/* Bottom Info: Stock Counts & Program */}
@@ -526,18 +533,18 @@ function ThemeHeatmapWidget({ onSearch, onPrefetch }: { onSearch?: (term: string
                             {theme.stocks.map((stock: any, j: number) => (
                                 <div
                                     key={j}
-                                    className="flex justify-between items-center text-sm cursor-pointer hover:bg-white/5 p-1 rounded"
+                                    className="flex justify-between items-center text-base cursor-pointer hover:bg-white/5 p-2 rounded"
                                     onClick={() => onSearch?.(stock.name)}
                                     onMouseEnter={() => onPrefetch?.(stock.name)}
                                 >
-                                    <span className="text-gray-400 text-xs w-24 truncate">{stock.name}</span>
-                                    <div className={`flex-1 h-1.5 mx-2 rounded-full overflow-hidden bg-gray-700`}>
+                                    <span className="text-gray-300 text-sm font-medium w-28 truncate">{stock.name}</span>
+                                    <div className={`flex-1 h-2 mx-3 rounded-full overflow-hidden bg-gray-700`}>
                                         <div
                                             className={`h-full ${stock.change > 20 ? 'bg-purple-500' : stock.change > 10 ? 'bg-red-500' : stock.change > 0 ? 'bg-red-400' : 'bg-blue-400'}`}
                                             style={{ width: `${Math.min(Math.abs(stock.change) * 3, 100)}%` }}
                                         />
                                     </div>
-                                    <span className={`text-xs font-mono font-bold w-12 text-right ${stock.change > 0 ? 'text-red-400' : stock.change < 0 ? 'text-blue-400' : 'text-gray-500'}`}>
+                                    <span className={`text-sm font-mono font-bold w-14 text-right ${stock.change > 0 ? 'text-red-400' : stock.change < 0 ? 'text-blue-400' : 'text-gray-500'}`}>
                                         {stock.change > 0 ? '+' : ''}{stock.change}%
                                     </span>
                                 </div>
@@ -580,5 +587,65 @@ function MarketList({ title, icon, items, fallbackText, loading, noDecimals = fa
                 )}
             </div>
         </div>
+    );
+}
+
+function LiveChart({ symbol }: { symbol: string }) {
+    const [data, setData] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchChart = async () => {
+            setLoading(true);
+            try {
+                // symbol: kospi, kosdaq, kospi200
+                const res = await fetch(`${API_BASE_URL}/api/korea/chart/${symbol}`);
+                const json = await res.json();
+                if (json.status === "success" && json.data) {
+                    setData(json.data);
+                }
+            } catch (e) {
+                console.error("Chart fetch error", e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchChart();
+    }, [symbol]);
+
+    if (loading) return <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-gray-500" /></div>;
+    if (!data || data.length === 0) return <div className="text-gray-500 text-sm">차트 데이터 없음</div>;
+
+    const isUp = (data[data.length - 1]?.close || 0) >= (data[0]?.close || 0);
+    const color = isUp ? "#ef4444" : "#3b82f6"; // Red or Blue
+
+    return (
+        <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data}>
+                <defs>
+                    <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                        <stop offset="95%" stopColor={color} stopOpacity={0} />
+                    </linearGradient>
+                </defs>
+                <XAxis dataKey="date" hide />
+                <YAxis domain={['auto', 'auto']} hide />
+                <Tooltip
+                    contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px' }}
+                    itemStyle={{ color: '#fff' }}
+                    formatter={(value: any) => [Number(value).toLocaleString(), '지수']}
+                    labelStyle={{ display: 'none' }}
+                />
+                <Area
+                    type="monotone"
+                    dataKey="close"
+                    stroke={color}
+                    fillOpacity={1}
+                    fill="url(#colorPrice)"
+                    strokeWidth={2}
+                    animationDuration={1000}
+                />
+            </AreaChart>
+        </ResponsiveContainer>
     );
 }

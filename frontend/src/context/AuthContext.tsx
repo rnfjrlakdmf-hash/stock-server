@@ -10,6 +10,7 @@ interface User {
     name: string;
     picture: string;
     is_pro: boolean;
+    free_trial_count?: number;
 }
 
 interface AuthContextType {

@@ -6,6 +6,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } 
 import { Plus, Trash2, Zap, Loader2, PieChart as PieChartIcon } from "lucide-react";
 import { API_BASE_URL } from "@/lib/config";
 import AdRewardModal from "@/components/AdRewardModal";
+import { checkReward } from "@/lib/reward";
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1'];
 
@@ -44,9 +45,11 @@ export default function PortfolioPage() {
             return;
         }
 
-        // Check for Pro Mode
+        // Check for Pro Mode or Valid Reward
         const isPro = localStorage.getItem("isPro") === "true";
-        if (!isPro && !hasPaid) {
+        const hasValidReward = checkReward();
+
+        if (!isPro && !hasValidReward && !hasPaid) {
             setShowAdModal(true);
             return;
         }

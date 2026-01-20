@@ -3,11 +3,13 @@
 import { API_BASE_URL } from "@/lib/config";
 import Link from "next/link";
 import React, { useState, useEffect } from "react";
-import { LayoutDashboard, Newspaper, Compass, Settings, Bell, MessageSquare, LineChart, Crown, Zap, X, Network, Sparkles, UserCheck, Shield, CalendarDays, Star, Menu } from "lucide-react";
+import { LayoutDashboard, Newspaper, Compass, Settings, Bell, MessageSquare, LineChart, Crown, Zap, X, Network, Sparkles, UserCheck, Shield, CalendarDays, Star, Menu, PlayCircle, Timer, History } from "lucide-react";
+import { App } from '@capacitor/app';
 import MarketClock from "./MarketClock";
 import { requestPayment } from "@/lib/payment";
 import { useAuth } from "@/context/AuthContext";
 import LoginModal from "./LoginModal";
+import AdRewardModal from "./AdRewardModal"; // Import Modal
 
 const navigation = [
     { name: "대시보드", href: "/", icon: LayoutDashboard },
@@ -29,7 +31,13 @@ export default function Sidebar() {
     const { user, logout } = useAuth();
     const [showLoginModal, setShowLoginModal] = useState(false);
     const [showProModal, setShowProModal] = useState(false);
+    const [showAdRewardModal, setShowAdRewardModal] = useState(false); // [New] Modal State
     const [exchangeRate, setExchangeRate] = useState<number>(1450); // Default fallback
+    const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+    // [New] Timer State
+    const [timeLeftStr, setTimeLeftStr] = useState<string | null>(null);
+    const [isPro, setIsPro] = useState(false);
 
     useEffect(() => {
         fetch(`${API_BASE_URL}/api/market/status`)
@@ -45,7 +53,132 @@ export default function Sidebar() {
 
     const proPriceUsd = 3.5;
     const proPriceKrw = Math.floor(proPriceUsd * exchangeRate / 10) * 10; // 10원 단위 절사
-    const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+    // [Android] Back Button Handler
+    useEffect(() => {
+        let listener: any;
+        const setupBack = async () => {
+            listener = await App.addListener('backButton', () => {
+                const path = window.location.pathname;
+                if (path === '/' || path === '/discovery' || path === '/auth/login') {
+                    App.exitApp();
+                } else {
+                    window.history.back();
+                }
+            });
+        };
+        setupBack();
+        return () => { if (listener) listener.remove(); };
+    }, []);
+
+    // [New] Real-time Countdown Timer
+    useEffect(() => {
+        const updateTimer = () => {
+            // Check Pro
+            const localPro = localStorage.getItem('isPro') === 'true';
+            setIsPro(localPro || user?.is_pro === true);
+
+            if (localPro || user?.is_pro) {
+                setTimeLeftStr("무제한 (PRO)");
+                return;
+            }
+
+            // Check Reward Expiry
+            const expiry = localStorage.getItem('rewardExpiry'); // Used for both reward time and pro trial
+            if (expiry) {
+                const expTime = parseInt(expiry);
+                const now = Date.now();
+                const diff = expTime - now;
+
+                if (diff > 0) {
+                    const h = Math.floor(diff / (1000 * 60 * 60));
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((diff % (1000 * 60)) / 1000);
+                    setTimeLeftStr(`${h}시간 ${m}분 ${s}초`);
+                } else {
+                    localStorage.removeItem('rewardExpiry');
+                    // Note: 'proExpiry' was used previously, now let's standardize on rewardExpiry for logic
+                    // If you used proExpiry before, you might want to check that too
+                    const proExpiry = localStorage.getItem('proExpiry');
+                    if (proExpiry) {
+                        // ... logic for legacy proExpiry if needed
+                        localStorage.removeItem('proExpiry');
+                    }
+                    setTimeLeftStr(null);
+                }
+            } else {
+                setTimeLeftStr(null);
+            }
+        };
+
+        updateTimer();
+        const interval = setInterval(updateTimer, 1000);
+        return () => clearInterval(interval);
+    }, [user, showAdRewardModal]); // Update on modal close too
+
+    const [freeTrialCount, setFreeTrialCount] = useState(0);
+    const [isLoadingTrial, setIsLoadingTrial] = useState(false);
+
+    // [Modified] Check if user is a real Google user
+    const isGoogleUser = user && !user.id.startsWith("dev_");
+
+    // Init Free Trial from User Profile (Backend Source of Truth)
+    useEffect(() => {
+        if (isGoogleUser) {
+            // Use count from DB (provided via AuthContext -> Login Response)
+            // Default to 2 if undefined (legacy/fallback)
+            const count = user?.free_trial_count !== undefined ? user.free_trial_count : 2;
+            setFreeTrialCount(count);
+        } else {
+            setFreeTrialCount(0);
+        }
+    }, [user, isGoogleUser]);
+
+    const handleFreeTrial = async () => {
+        if (isGoogleUser && freeTrialCount > 0 && !isLoadingTrial) {
+            setIsLoadingTrial(true);
+            try {
+                // Call Backend API to decrement count
+                const res = await fetch(`${API_BASE_URL}/api/auth/use-trial`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ user_id: user?.id })
+                });
+
+                const data = await res.json();
+
+                if (data.status === "success" && typeof data.new_count === 'number') {
+                    const newCount = data.new_count;
+                    setFreeTrialCount(newCount);
+
+                    // Update local storage user object to keep sync on refresh (optimistic)
+                    if (user) {
+                        const updatedUser = { ...user, free_trial_count: newCount };
+                        localStorage.setItem("stock_user", JSON.stringify(updatedUser)); // For AuthContext init
+                    }
+
+                    // Grant 1 Hour Time
+                    const now = Date.now();
+                    const currentExpiry = localStorage.getItem("rewardExpiry");
+                    let baseTime = now;
+                    if (currentExpiry && parseInt(currentExpiry) > now) {
+                        baseTime = parseInt(currentExpiry);
+                    }
+                    const newExpiry = baseTime + (1 * 60 * 60 * 1000); // 1 hour
+                    localStorage.setItem("rewardExpiry", newExpiry.toString());
+
+                    alert(`🎁 신규 혜택 적용! 광고 없이 1시간이 충전되었습니다.\n(남은 무료 기회: ${newCount}회)`);
+                } else {
+                    alert("오류: " + (data.message || "이용권 사용 실패"));
+                }
+            } catch (e) {
+                console.error(e);
+                alert("서버 통신 오류가 발생했습니다.");
+            } finally {
+                setIsLoadingTrial(false);
+            }
+        }
+    };
 
     return (
         <>
@@ -66,14 +199,14 @@ export default function Sidebar() {
             )}
 
             <div className={`
-                fixed inset-y-0 left-0 z-50 h-full w-80 flex flex-col justify-between border-r border-white/10 bg-[#050505] md:bg-black/40 backdrop-blur-xl text-white p-4 transition-transform duration-300 ease-in-out
+                fixed inset-y-0 left-0 z-50 h-full w-80 flex flex-col justify-between border-r border-white/10 bg-[#09090b] md:bg-black/40 backdrop-blur-xl text-white p-4 pt-24 md:pt-4 transition-transform duration-300 ease-in-out
                 md:relative md:translate-x-0 md:flex
                 ${isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:translate-x-0'}
             `}>
                 {/* Mobile Close Button */}
                 <button
                     onClick={() => setIsMobileOpen(false)}
-                    className="absolute top-2 right-2 p-2 text-gray-400 hover:text-white md:hidden z-10"
+                    className="absolute top-6 right-4 p-2 text-gray-400 hover:text-white md:hidden z-10 bg-black/20 rounded-full"
                 >
                     <X className="h-6 w-6" />
                 </button>
@@ -98,47 +231,88 @@ export default function Sidebar() {
                         ))}
                     </nav>
                 </div>
-                <div className="mt-auto space-y-4">
-                    {/* API Debug Info */}
-                    <div className="text-[9px] text-gray-500 text-center font-mono break-all bg-white/5 rounded py-1">API: {API_BASE_URL}</div>
+                <div className="mt-auto space-y-2">
                     {user ? (
-                        <div className="rounded-xl bg-white/5 p-4 border border-white/5 flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white text-lg">
+                        <div className="rounded-xl bg-white/10 p-3 border border-white/10 flex items-center gap-3 shadow-lg">
+                            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white text-base ring-2 ring-white/20">
                                 {user.name[0]}
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-white truncate">{user.name}</p>
-                                <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                                <p className="text-xs text-gray-300 truncate">{user.email}</p>
                             </div>
-                            <button onClick={logout} className="p-2 text-gray-400 hover:text-white transition-colors">
-                                <span className="text-xs">로그아웃</span>
+                            <button onClick={logout} className="p-1.5 text-gray-300 hover:text-white transition-colors bg-white/5 rounded-lg">
+                                <span className="text-[10px] font-bold">로그아웃</span>
                             </button>
                         </div>
                     ) : (
                         <button
                             onClick={() => setShowLoginModal(true)}
-                            className="w-full rounded-xl bg-white/10 py-3 text-sm font-bold text-white hover:bg-white/20 transition-colors flex items-center justify-center gap-2"
+                            className="w-full rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
                         >
                             <UserCheck className="w-4 h-4" />
                             로그인
                         </button>
                     )}
 
-                    {!user?.is_pro && (
+                    {!isPro && (
                         <>
                             <MarketClock />
-                            <div className="rounded-xl bg-gradient-to-br from-blue-900/50 to-purple-900/50 p-4 border border-white/5">
-                                <p className="text-xs font-semibold text-blue-200 mb-1">PRO 요금제</p>
-                                <p className="text-[10px] text-gray-400 mb-3">
-                                    월 ${proPriceUsd} (약 ₩{proPriceKrw.toLocaleString()})<br />
-                                    고급 AI 인사이트를 받아보세요
-                                </p>
-                                <button
-                                    onClick={() => setShowProModal(true)}
-                                    className="w-full rounded-lg bg-blue-600 py-2 text-xs font-bold text-white hover:bg-blue-500 transition-colors"
-                                >
-                                    업그레이드
-                                </button>
+                            <div className="rounded-xl bg-gradient-to-br from-gray-800 to-gray-900 p-3 border border-white/10 shadow-lg relative overflow-hidden group">
+                                <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                                    <Timer className="w-16 h-16 text-white" />
+                                </div>
+
+                                <div className="flex justify-between items-start mb-2">
+                                    <div>
+                                        <p className="text-xs font-bold text-blue-200 mb-0.5 flex items-center gap-2">
+                                            <Crown className="w-3 h-3 text-yellow-400" /> PRO 요금제
+                                        </p>
+                                        <p className="text-[10px] text-gray-400">AI 통찰력 무제한 이용</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowProModal(true)}
+                                        className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold px-2 py-1 rounded transition-colors"
+                                    >
+                                        UP
+                                    </button>
+                                </div>
+
+                                {/* Timer / Reward Section */}
+                                <div className="pt-2 border-t border-white/10 mt-1">
+                                    {timeLeftStr ? (
+                                        <div className="mb-2">
+                                            <div className="flex justify-between items-center text-[10px] text-gray-300 mb-1">
+                                                <span>남은 시간</span>
+                                                <span className="text-green-400 font-mono font-bold animate-pulse">{timeLeftStr}</span>
+                                            </div>
+                                            <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden border border-white/5">
+                                                <div className="bg-gradient-to-r from-green-500 to-emerald-400 h-full w-full animate-pulse" />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-[10px] text-gray-400 mb-2 text-center">
+                                            이용권이 없습니다.
+                                        </div>
+                                    )}
+
+                                    {freeTrialCount > 0 ? (
+                                        <button
+                                            onClick={handleFreeTrial}
+                                            className="w-full rounded-lg py-2 text-[10px] font-bold bg-green-600 text-white hover:bg-green-500 animate-pulse border border-green-400/30 flex items-center justify-center gap-1 shadow-md transition-colors"
+                                        >
+                                            🎁 1시간 무료 이용하기 ({freeTrialCount}회)
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => setShowAdRewardModal(true)}
+                                            className="w-full rounded-lg py-2 text-[10px] font-bold bg-white/10 text-gray-200 hover:bg-white/20 border border-white/10 flex items-center justify-center gap-1 transition-colors"
+                                        >
+                                            <PlayCircle className="w-3 h-3 text-yellow-500" />
+                                            광고 보고 시간 충전 (30분)
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </>
                     )}
@@ -146,6 +320,7 @@ export default function Sidebar() {
             </div>
 
             <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
+            <AdRewardModal isOpen={showAdRewardModal} onClose={() => setShowAdRewardModal(false)} onReward={() => { }} featureName="SidebarCharge" />
 
             {showProModal && (
                 <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">

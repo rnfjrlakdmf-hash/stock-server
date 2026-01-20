@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, DollarSign, RefreshCw, Droplet } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
+import { API_BASE_URL } from "@/lib/config";
 
 interface MarketItem {
     name: string;
@@ -53,7 +54,7 @@ export default function MarketIndicators({ limit }: MarketIndicatorsProps) {
 
     const fetchAssets = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/assets');
+            const res = await fetch(`${API_BASE_URL}/api/assets`);
             const json = await res.json();
             if (json.status === "success") {
                 setData(json.data);

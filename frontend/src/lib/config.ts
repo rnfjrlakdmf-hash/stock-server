@@ -11,10 +11,18 @@ const isAndroid = typeof window !== 'undefined' && (
 
 let apiBase = "http://localhost:8000";
 
-if (typeof window !== 'undefined') {
+if (process.env.NEXT_PUBLIC_API_URL) {
+    apiBase = process.env.NEXT_PUBLIC_API_URL;
+    if (apiBase.includes('replace-with-your-server')) {
+        console.error('[Config] CRITICAL: API URL is still set to placeholder! Please update .env.production');
+        // Fallback to local IP if possible, or keep as is (which will fail, but visible in logs)
+    }
+} else if (typeof window !== 'undefined') {
     if (isAndroid) {
-        // Android Emulator Loopback Address
-        apiBase = "http://10.0.2.2:8000";
+        // Android Emulator or Device in Dev Mode
+        // If you want to test on real device with local backend, use your PC's IP or Ngrok
+        // For production build, NEXT_PUBLIC_API_URL should be set in .env.production
+        apiBase = "http://10.0.2.2:8000"; // Default Android Emulator Loopback
     } else {
         // Web Browser / Desktop
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {

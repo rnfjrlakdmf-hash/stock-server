@@ -1,0 +1,64 @@
+
+def get_naver_daily_prices(symbol: str):
+    """
+    네이버 금융 차트 API를 통해 일별 시세를 가져옵니다. (최근 30일)
+    """
+    code = symbol.split('.')[0]
+    code = re.sub(r'[^0-9]', '', code)
+    if len(code) != 6: return []
+
+    url = f"https://fchart.stock.naver.com/sise.nhn?symbol={code}&timeframe=day&count=30&requestType=0"
+    
+    try:
+        import requests
+        import xml.etree.ElementTree as ET
+        
+        res = requests.get(url)
+        if res.status_code == 200:
+            root = ET.fromstring(res.text)
+            
+            parsed_data = []
+            items = root.findall("item")
+            
+            for item in items:
+                data_str = item.get("data")
+                if data_str:
+                    parts = data_str.split("|")
+                    # data format: YYYYMMDD|Open|High|Low|Close|Volume
+                    if len(parts) >= 6:
+                        parsed_data.append({
+                            "date": f"{parts[0][:4]}-{parts[0][4:6]}-{parts[0][6:]}",
+                            "open": float(parts[1]),
+                            "high": float(parts[2]),
+                            "low": float(parts[3]),
+                            "close": float(parts[4]),
+                            "volume": int(parts[5])
+                        })
+            
+            # Calculate metrics (Change %)
+            final_list = []
+            for i in range(len(parsed_data)):
+                curr = parsed_data[i]
+                # For the first item, we might not have prev close, assume 0 change or based on Open
+                prev_close = parsed_data[i-1]["close"] if i > 0 else curr["open"]
+                
+                change = 0.0
+                if prev_close > 0:
+                    change = ((curr["close"] - prev_close) / prev_close) * 100
+                    
+                final_list.append({
+                    "date": curr["date"],
+                    "open": curr["open"],
+                    "high": curr["high"],
+                    "low": curr["low"],
+                    "close": curr["close"],
+                    "volume": curr["volume"],
+                    "change": change
+                })
+            
+            # Return newest first
+            return final_list[::-1]
+
+    except Exception as e:
+        print(f"Naver Daily Price Error: {e}")
+        return []

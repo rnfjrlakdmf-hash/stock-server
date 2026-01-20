@@ -31,9 +31,20 @@ def init_db():
             name TEXT,
             picture TEXT,
             is_pro BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            free_trial_count INTEGER DEFAULT 2
         )
     ''')
+    
+    # [Migration] Add free_trial_count if not exists
+    try:
+        cursor.execute("SELECT free_trial_count FROM users LIMIT 1")
+    except sqlite3.OperationalError:
+        print("Migrating users table (adding free_trial_count)...")
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN free_trial_count INTEGER DEFAULT 2")
+        except Exception as e:
+            print(f"Migration Warning: {e}")
 
     # Watchlist Table (User Specific)
     # Check if watchlist table has user_id column
@@ -77,8 +88,8 @@ def create_user_if_not_exists(user_data):
         
         if not row:
             cursor.execute('''
-                INSERT INTO users (id, email, name, picture)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (id, email, name, picture, free_trial_count)
+                VALUES (?, ?, ?, ?, 2)
             ''', (user_data['id'], user_data['email'], user_data['name'], user_data['picture']))
         else:
             # Update info
@@ -98,7 +109,9 @@ def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, email, name, picture, is_pro FROM users WHERE id = ?", (user_id,))
+        # Fetch free_trial_count too (added to schema)
+        # Note: If accessing old DB file without migration, fetch might fail unless we handled migration in init
+        cursor.execute("SELECT id, email, name, picture, is_pro, free_trial_count FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         if row:
             return {
@@ -106,12 +119,37 @@ def get_user(user_id):
                 "email": row[1],
                 "name": row[2],
                 "picture": row[3],
-                "is_pro": bool(row[4])
+                "is_pro": bool(row[4]),
+                "free_trial_count": row[5] if row[5] is not None else 2
             }
         return None
     except Exception as e:
         print(f"Get User Error: {e}")
         return None
+    finally:
+        conn.close()
+
+def decrement_free_trial(user_id):
+    """
+    1시간 무료 이용권 사용 (차감)
+    Returns: new_count or -1 if failed/already 0
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        # Decrease only if > 0
+        cursor.execute("UPDATE users SET free_trial_count = free_trial_count - 1 WHERE id = ? AND free_trial_count > 0", (user_id,))
+        if cursor.rowcount > 0:
+            conn.commit()
+            # Fetch new count
+            cursor.execute("SELECT free_trial_count FROM users WHERE id = ?", (user_id,))
+            row = cursor.fetchone()
+            return row[0]
+        else:
+            return -1 # No change (probably 0 left)
+    except Exception as e:
+        print(f"Decrement Trial Error: {e}")
+        return -1
     finally:
         conn.close()
 

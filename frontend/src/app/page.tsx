@@ -232,7 +232,14 @@ function AssetTicker() {
                 <span className="font-medium text-gray-200 whitespace-nowrap truncate">{item.name.replace(' Market', '').replace('USD/KRW', 'USD').replace('JPY/KRW', 'JPY')}</span>
                 <div className="text-right">
                   <div className="font-bold text-white">
-                    {item.currency === 'KRW' ? '₩' : '$'}{item.price.toLocaleString(undefined, { maximumFractionDigits: item.currency === 'KRW' ? 0 : 2 })}
+                    {(() => {
+                      // 화폐 단위 결정 로직
+                      if (cat.key === 'Crypto') return '₩';
+                      if (cat.key === 'Forex') return '₩';
+                      if (cat.key === 'Commodity') return item.name.includes('국내') ? '₩' : '$';
+                      return ''; // Indices 등은 단위 없음
+                    })()}
+                    {Number(String(item.price).replace(/,/g, '')).toLocaleString(undefined, { maximumFractionDigits: cat.key === 'Indices' ? 2 : 2 })}
                   </div>
                   <div className={`text-[10px] ${item.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                     {item.change >= 0 ? '+' : ''}{Number(item.change || 0).toFixed(2)}%

@@ -16,3 +16,6 @@ dist/
 # System
 .DS_Store
 Thumbs.db
+
+# Deployment archives
+deploy.tar.gz

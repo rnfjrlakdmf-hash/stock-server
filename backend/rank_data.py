@@ -62,52 +62,48 @@ def get_realtime_top10(market="KR", refresh=False):
     # 2. 병렬로 데이터 가져오기 (속도 개선)
     results = []
     
+    # [New] 통합 데이터 조회 함수 사용 (네이버 우선 -> yfinance Fallback)
+    from stock_data import get_simple_quote
+
     def fetch_data(item):
         try:
-            ticker = yf.Ticker(item['ticker'])
+            ticker = item['ticker']
             
-            price = 0.0
-            prev_close = 0.0
+            # get_simple_quote는 {"price": "75,000", "change": "+500", "change_percent": "+0.67%"} 형태 반환
+            quote = get_simple_quote(ticker)
             
-            # 1단계: fast_info 시도
-            try:
-                price = getattr(ticker.fast_info, 'last_price', 0.0)
-                prev_close = getattr(ticker.fast_info, 'previous_close', 0.0)
-            except:
-                pass
-                
-            # 2단계: history 시도 (데이터가 0이거나 실패 시)
-            if price == 0 or prev_close == 0:
+            if quote and quote.get("price") != "0" and quote.get("price") != "-":
+                # 문자열 데이터를 float로 변환 (계산 및 정렬 용도)
                 try:
-                    # 최근 5일치 가져와서 마지막 종가를 현재가로 사용
-                    hist = ticker.history(period="5d")
-                    if not hist.empty:
-                        price = hist['Close'].iloc[-1]
-                        if len(hist) >= 2:
-                            prev_close = hist['Close'].iloc[-2]
-                        else:
-                            prev_close = price # 전일 데이터 없으면 0% 변동으로 처리
-                except:
-                    pass
-            
-            # 3단계: info 시도 (마지막 수단)
-            if price == 0:
-                 try:
-                    info = ticker.info
-                    price = info.get('currentPrice', info.get('regularMarketPrice', 0.0))
-                    if prev_close == 0:
-                        prev_close = info.get('previousClose', info.get('regularMarketPreviousClose', 0.0))
-                 except:
-                    pass
+                    price_str = str(quote["price"]).replace(",", "").replace("₩", "").replace("$", "")
+                    price = float(price_str)
+                    
+                    # Fix: quote['change'] contains the percentage string (e.g. "+0.47%")
+                    # quote['change_percent'] is missing in simple quotes
+                    
+                    raw_change = str(quote["change"]).replace(",", "").replace("+", "").replace("▲", "").replace("▼", "").replace("%", "")
+                    val = float(raw_change)
+                    
+                    if str(quote["change"]).startswith("-") or "▼" in str(quote["change"]):
+                        val = -abs(val)
+                        
+                    # Assign parsed percentage to both fields logic
+                    change_pct = val
+                    
+                    # Calculate estimated absolute change for compatibility
+                    # Absolute Change = Price * (Percent / 100)
+                    change = price * (change_pct / 100.0)
 
-            # None 체크 및 형변환
-            if price is None: price = 0.0
-            if prev_close is None: prev_close = 0.0
-            
-            if price and prev_close and prev_close != 0:
-                change = price - prev_close
-                change_pct = (change / prev_close) * 100
+                except Exception as e:
+                    # Parsing failed, default to 0
+                    # print(f"Warning: Parsing error for {ticker}: {e}")
+                    price = 0.0
+                    change = 0.0
+                    change_pct = 0.0
             else:
+                # 완전 실패 시
+                # print(f"Warning: No valid quote for {ticker}. Quote: {quote}")
+                price = 0.0
                 change = 0.0
                 change_pct = 0.0
             
@@ -115,14 +111,13 @@ def get_realtime_top10(market="KR", refresh=False):
                 "rank": 0, 
                 "symbol": item['ticker'],
                 "name": item['name'],
-                "price": float(price),
-                "change": float(change),
-                "change_percent": float(change_pct)
+                "price": price,
+                "change": change,
+                "change_percent": change_pct
             }
         except Exception as e:
             # 에러 로그 출력 (디버깅용)
-            print(f"Error fetching {item['ticker']}: {e}")
-            # 완전 실패 시 0으로 채워서 반환 (리스트에서 빠지지 않게)
+            # print(f"Error fetching {item['ticker']}: {e}")
             return {
                 "rank": 0, 
                 "symbol": item['ticker'],
@@ -136,8 +131,8 @@ def get_realtime_top10(market="KR", refresh=False):
         futures = [executor.submit(fetch_data, item) for item in symbols]
         for future in futures:
             try:
-                # 타임아웃 2초 설정 (전체 응답 지연 방지)
-                res = future.result(timeout=2)
+                # 타임아웃 3초로 조금 여유있게
+                res = future.result(timeout=3)
                 if res:
                     results.append(res)
             except Exception as e:

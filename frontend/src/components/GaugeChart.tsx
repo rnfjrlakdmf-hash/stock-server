@@ -55,8 +55,8 @@ export default function GaugeChart({ score, label, subLabel, color = "#3b82f6" }
                 </ResponsiveContainer>
 
                 <div className="absolute top-[60%] left-1/2 -translate-x-1/2 text-center transform -translate-y-1/2 whitespace-nowrap">
-                    <span className="text-4xl font-bold text-white block drop-shadow-lg">{score}</span>
-                    <span className="text-xs text-gray-400 uppercase tracking-widest font-semibold">{label}</span>
+                    <span className="text-2xl md:text-4xl font-bold text-white block drop-shadow-lg">{score}</span>
+                    <span className="text-[10px] md:text-xs text-gray-400 uppercase tracking-widest font-semibold">{label}</span>
                 </div>
             </div>
             {subLabel && <p className="text-sm text-gray-500 mt-[-20px] text-center">{subLabel}</p>}
