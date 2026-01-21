@@ -21,6 +21,91 @@ NAME_CACHE = {}
 STOCK_DATA_CACHE = {}  # {symbol: (data, timestamp)}
 CACHE_TTL = 60  # 60 seconds
 
+# [Config] Global Stock Korean Name Mapping
+GLOBAL_KOREAN_NAMES = {
+    "AAPL": "애플",
+    "TSLA": "테슬라",
+    "MSFT": "마이크로소프트",
+    "NVDA": "엔비디아",
+    "AMZN": "아마존",
+    "GOOGL": "구글 (알파벳)",
+    "GOOG": "구글 (알파벳)",
+    "META": "메타 (페이스북)",
+    "NFLX": "넷플릭스",
+    "AMD": "AMD",
+    "INTC": "인텔",
+    "QCOM": "퀄컴",
+    "AVGO": "브로드컴",
+    "TXN": "텍사스 인스트루먼트",
+    "ASML": "ASML",
+    "KO": "코카콜라",
+    "PEP": "펩시",
+    "SBUX": "스타벅스",
+    "NKE": "나이키",
+    "DIS": "디즈니",
+    "MCD": "맥도날드",
+    "JNJ": "존슨앤존슨",
+    "PFE": "화이자",
+    "MRNA": "모더나",
+    "PLTR": "팔란티어",
+    "IONQ": "아이온큐",
+    "U": "유니티",
+    "RBLX": "로블록스",
+    "COIN": "코인베이스",
+    "RIVN": "리비안",
+    "LCID": "루시드",
+    "TQQQ": "TQQQ (나스닥 3배)",
+    "SOXL": "SOXL (반도체 3배)",
+    "SCHD": "SCHD (배당 성장)",
+    "JEPI": "JEPI (커버드콜)",
+    "SPY": "SPY (S&P500)",
+    "QQQ": "QQQ (나스닥100)",
+    "O": "리얼티인컴",
+    "CPNG": "쿠팡",
+    "BA": "보잉",
+    "BAC": "뱅크오브아메리카",
+    "WMT": "월마트",
+    "COST": "코스트코",
+    "HD": "홈디포",
+    "PG": "P&G",
+    "V": "비자",
+    "MA": "마스터카드",
+}
+
+def search_yahoo_finance(keyword: str) -> str | None:
+    """
+    Search for a global stock ticker using Yahoo Finance API.
+    Returns the symbol of the first relevant match.
+    """
+    try:
+        url = "https://query2.finance.yahoo.com/v1/finance/search"
+        params = {
+            "q": keyword,
+            "lang": "en-US",
+            "region": "US",
+            "quotesCount": 5,
+            "newsCount": 0,
+            "enableFuzzyQuery": "false",
+            "quotesQueryId": "tss_match_phrase_query"
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=3)
+        data = resp.json()
+        
+        if "quotes" in data and len(data["quotes"]) > 0:
+            # Filter for Equity or ETF
+            for quote in data["quotes"]:
+                if quote.get("quoteType") in ["EQUITY", "ETF"]:
+                    symbol = quote.get("symbol")
+                    return symbol
+                    
+        return None
+    except Exception as e:
+        print(f"Yahoo Search Error for '{keyword}': {e}")
+        return None
+
 
 def safe_float(val):
     try:
@@ -164,6 +249,13 @@ def get_stock_info(symbol: str, skip_ai: bool = False):
             # Use Naver Crawler
             naver_info = get_naver_stock_info(t_symbol)
             if naver_info:
+                # [Fix] Correct Symbol Suffix (KS vs KQ)
+                # Naver search works by code, so we trust its returned market type
+                if naver_info.get('market_type') == 'KQ' and t_symbol.endswith('.KS'):
+                    t_symbol = t_symbol.replace('.KS', '.KQ')
+                elif naver_info.get('market_type') == 'KS' and t_symbol.endswith('.KQ'):
+                    t_symbol = t_symbol.replace('.KQ', '.KS')
+                    
                 # Parallel fetch for extras (Daily Prices & News)
                 daily_data = []
                 news_data = []
@@ -287,16 +379,17 @@ def get_stock_info(symbol: str, skip_ai: bool = False):
             found_code = search_korean_stock_symbol(symbol)
             
             if found_code:
-                print(f"Found code '{found_code}' for name '{symbol}'. Retrying...")
-                # Recursively call with the found code
-                # Note: found_code should be 6 digits, so it will hit the KS/KQ logic next time
+                print(f"Found Korean code '{found_code}' for name '{symbol}'. Retrying...")
                 return get_stock_info(found_code, skip_ai=skip_ai)
             
-            # Check if it was an explicit valid format that just failed fast_info (rare)
-            # Or try Theme Search
-            # If not symbol.endswith(('.KS', '.KQ', '.F', '-USD')):
-            #      # Theme Search Logic Removed at user request (Only Stocks allowed)
-            #      pass
+            # [New] Global Stock Search Fallback (Yahoo Finance)
+            # If Korean search failed, try global search
+            print(f"Korean search failed for '{symbol}'. Trying Global Search...")
+            global_symbol = search_yahoo_finance(symbol)
+            
+            if global_symbol:
+                print(f"Found Global symbol '{global_symbol}' for name '{symbol}'. Retrying...")
+                return get_stock_info(global_symbol, skip_ai=skip_ai)
 
             return None  # Give up
 
@@ -462,6 +555,12 @@ def get_stock_info(symbol: str, skip_ai: bool = False):
         # For Korean stocks, prefer the Korean name (stock_name) over
         # yfinance's shortName (English)
         display_name = info.get('shortName', stock_name)
+        
+        # [New] Global Korean Name Mapping
+        # If it's a known global stock, use the Korean friendly name
+        if target_symbol in GLOBAL_KOREAN_NAMES:
+             display_name = GLOBAL_KOREAN_NAMES[target_symbol]
+        
         if target_symbol.endswith(('.KS', '.KQ')):
             if stock_name and stock_name != target_symbol:
                 display_name = stock_name

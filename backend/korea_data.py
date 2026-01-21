@@ -8,6 +8,11 @@ import concurrent.futures
 
 
 
+
+import threading
+
+DYNAMIC_STOCK_MAP = {} # Global Cache for Stock Names -> Codes
+
 def get_naver_disclosures(symbol: str):
 
     """
@@ -150,6 +155,36 @@ def search_korean_stock_symbol(keyword: str):
     종목명으로 검색하여 종목코드(Symbol)를 찾습니다. (크롤링)
     """
     try:
+        # [Manual Mapping Fallback]
+        # Bypass crawling for known stocks that fail due to blocking
+        MANUAL_STOCK_MAP = {
+            "한화오션": "042660",
+            "HANWHAOCEAN": "042660",
+            "대우조선해양": "042660",
+            # Add others if needed
+        }
+        
+        normalized_keyword = keyword.replace(" ", "").upper()
+        if normalized_keyword in MANUAL_STOCK_MAP:
+            return MANUAL_STOCK_MAP[normalized_keyword]
+        
+            if k in normalized_keyword:
+                return v
+
+        # [Dynamic Map Check]
+        if normalized_keyword in DYNAMIC_STOCK_MAP:
+            return DYNAMIC_STOCK_MAP[normalized_keyword]
+            
+        # Check partial match in Dynamic Map
+        for name, code in DYNAMIC_STOCK_MAP.items():
+            # If the user query is very short (e.g. 2 chars), be careful with partial match
+            if len(normalized_keyword) >= 2 and normalized_keyword in name:
+                 # Prefer exact start match
+                 if name.startswith(normalized_keyword):
+                     return code
+            # Also check if name is in keyword (e.g. "Samsung Electronics" -> "Samsung")
+            # Usually keyword is shorter.
+
         # euc-kr Encoding for Naver Query
         from urllib.parse import quote
         encoded_query = quote(keyword.encode('euc-kr'))
@@ -286,6 +321,83 @@ def _get_soup(url, headers):
 
         return None
 
+
+
+    except Exception:
+        return None
+
+
+
+def refresh_stock_codes():
+    """
+    Background Task:
+    Crawls Naver Finance Market Cap pages (KOSPI & KOSDAQ) to populate DYNAMIC_STOCK_MAP.
+    Fetches top ~300 stocks from each market.
+    """
+    global DYNAMIC_STOCK_MAP
+    print("[StockData] Starting background stock code indexing...")
+    
+    try:
+        new_map = {}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91"
+        }
+        
+        # 0: KOSPI, 1: KOSDAQ
+        for sosok in [0, 1]:
+            # Crawl first 6 pages (50 * 6 = 300 stocks per market, total 600)
+            for page in range(1, 7): 
+                try:
+                    url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
+                    res = requests.get(url, headers=headers, timeout=5)
+                    
+                    # Encoding
+                    try: 
+                        html = res.content.decode('euc-kr') 
+                    except: 
+                        html = res.text
+                        
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # Table rows
+                    links = soup.select("table.type_2 tbody tr td a.tltle")
+                    for link in links:
+                        name = link.text.strip()
+                        href = link['href']
+                        # href="/item/main.naver?code=005930"
+                        code_match = re.search(r'code=(\d+)', href)
+                        if code_match:
+                            code = code_match.group(1)
+                            
+                            # Add to map (Normalize Name)
+                            norm_name = name.replace(" ", "").upper()
+                            new_map[norm_name] = code
+                            
+                            # Add Suffix
+                            key_k = "KS" if sosok == 0 else "KQ"
+                            # If we want detailed mapping, we could store "005930.KS"
+                            # But search_korean_stock_symbol is expected to return just the 6-digit code usually?
+                            # Looking at old logic: "return code". success.
+                            # But stock_data might prefer suffix.
+                            # Let's verify existing logic. OLD logic returned just code.
+                            # stock_data.py line 340 handles 6-digit by trying .KS and .KQ.
+                            # So storing just 6 digit is fine.
+                            new_map[norm_name] = code
+                            
+                except Exception as e:
+                    print(f"Error crawling page {page} of market {sosok}: {e}")
+                    
+        # Update Global Map
+        count_before = len(DYNAMIC_STOCK_MAP)
+        DYNAMIC_STOCK_MAP.update(new_map)
+        print(f"[StockData] Indexed {len(new_map)} stocks. Total unique: {len(DYNAMIC_STOCK_MAP)}")
+        
+    except Exception as e:
+        print(f"[StockData] Indexing failed: {e}")
+
+# Start indexing on import (in background)
+t = threading.Thread(target=refresh_stock_codes, daemon=True)
+t.start()
 
 
 def get_naver_market_index_data():
@@ -1886,9 +1998,38 @@ def get_naver_stock_info(symbol: str):
             "year_high": 0, "year_low": 0
         }
         
-        # 1. Name
+        # 1. Name & Market Type
         h2 = soup.select_one(".wrap_company h2 a")
         if h2: info['name'] = h2.text.strip()
+        
+        # Detect Market Type (KOSPI vs KOSDAQ)
+        # Usually inside .description area or next to h2
+        # <div class="description"><img class="kospi|kosdaq" ...></div>
+        # or <img src="..." alt="코스피">
+        info['market_type'] = "KS" # Default
+        description = soup.select_one(".description")
+        
+        # Method 1: Check description img alt/class
+        if description:
+            img = description.select_one("img")
+            if img:
+                alt = img.get('alt', '').lower()
+                src = img.get('src', '').lower()
+                cls = img.get('class', [])
+                
+                if '코스닥' in alt or 'kosdaq' in alt or 'kosdaq' in src:
+                    info['market_type'] = "KQ"
+        
+        # Method 2: Check for specific areas (kosdaq_area)
+        if info['market_type'] == "KS": # Only check if still KS
+            if soup.select_one(".kosdaq_area") or soup.select_one("img[alt='코스닥']"):
+                 info['market_type'] = "KQ"
+                 
+        # Method 3: Check sidebar or other indicators if main fails
+        if info['market_type'] == "KS":
+             # Sometimes Naver changes layout. Check if "KOSDAQ" text is near the code/name
+             # This is risky, so we stick to reliable selectors.
+             pass
         
         # 2. Price
         no_today = soup.select_one(".no_today .blind")
