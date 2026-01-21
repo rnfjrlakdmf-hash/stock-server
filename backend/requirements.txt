@@ -10,3 +10,4 @@ lightweight-charts
 plotly
 python-dotenv
 GoogleNews
+scipy

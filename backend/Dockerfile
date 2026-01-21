@@ -9,14 +9,14 @@ WORKDIR /app
 # RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements to temp location
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend application code to /app
 # This puts main.py directly in /app
-COPY backend/ .
+COPY . .
 
 # Expose port
 EXPOSE 8000
