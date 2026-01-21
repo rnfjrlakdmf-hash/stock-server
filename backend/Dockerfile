@@ -1,13 +1,12 @@
-# Python 3.13 Base Image
-FROM python:3.13-slim
+# Python 3.11 Base Image (More stable wheel support)
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (if needed for some libraries)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+# (Skipping gcc as most packages have binary wheels for Python 3.11)
+# RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
 COPY requirements.txt .
