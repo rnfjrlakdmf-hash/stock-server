@@ -23,4 +23,4 @@ EXPOSE 8000
 
 # Command to run the application
 # Since main.py is in /app, we run "main:app"
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
