@@ -482,13 +482,13 @@ function DiscoveryContent() {
                             <div className="lg:col-span-2 space-y-6">
                                 {/* Main Score Card */}
                                 <div className="rounded-3xl bg-black/40 border border-white/20 p-6 backdrop-blur-md shadow-lg">
-                                    <div className="flex items-center justify-between mb-8">
+                                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4 md:gap-0">
                                         <div>
-                                            <h3 className="text-3xl font-bold flex items-center gap-3 text-white">
-                                                {stock.name} <span className="text-lg text-gray-400 font-medium">{stock.symbol}</span>
+                                            <h3 className="text-2xl md:text-3xl font-bold flex flex-wrap items-center gap-2 md:gap-3 text-white">
+                                                {stock.name} <span className="text-base md:text-lg text-gray-400 font-medium whitespace-nowrap">{stock.symbol}</span>
                                             </h3>
-                                            <div className="flex items-center gap-3 mt-2">
-                                                <span className="text-4xl font-bold text-white">
+                                            <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-2">
+                                                <span className="text-3xl md:text-4xl font-bold text-white">
                                                     {stock.currency === 'KRW'
                                                         ? `₩${Number(String(stock.price).replace(/,/g, '')).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                                                         : (stock.currency === 'USD' || (stock.currency && typeof stock.currency === 'string' && stock.currency.includes('USD')))
@@ -497,26 +497,29 @@ function DiscoveryContent() {
                                                 </span>
                                                 {/* [New] Show KRW for foreign stocks */}
                                                 {stock.price_krw && (
-                                                    <span className="text-xl text-gray-400 font-mono">
+                                                    <span className="text-lg md:text-xl text-gray-400 font-mono">
                                                         (₩{stock.price_krw})
                                                     </span>
                                                 )}
-                                                <span className={`font-bold px-3 py-1 rounded-lg text-lg ${stock.currency === 'KRW' ? (String(stock.change).startsWith('+') ? 'text-red-400 bg-red-400/20' : 'text-blue-400 bg-blue-400/20') : (String(stock.change).startsWith('+') ? 'text-green-400 bg-green-400/20' : 'text-red-400 bg-red-400/20')}`}>
+                                                <span className={`font-bold px-2 py-1 md:px-3 md:py-1 rounded-lg text-base md:text-lg ${stock.currency === 'KRW' ? (String(stock.change).startsWith('+') ? 'text-red-400 bg-red-400/20' : 'text-blue-400 bg-blue-400/20') : (String(stock.change).startsWith('+') ? 'text-green-400 bg-green-400/20' : 'text-red-400 bg-red-400/20')}`}>
                                                     {stock.change}
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className="text-sm text-gray-400 mb-1">AI 종합 점수</div>
-                                            <div className={`text-5xl font-black ${stock.score >= 70 ? 'text-green-400' : 'text-yellow-400'} drop-shadow-sm`}>{stock.score}</div>
-                                            <div className="mt-2 flex items-center justify-end gap-2">
+                                        <div className="w-full md:w-auto flex flex-wrap md:flex-col justify-between md:justify-end items-center md:items-end gap-4 md:gap-0 border-t md:border-t-0 border-white/10 pt-4 md:pt-0">
+                                            <div className="flex items-center gap-3 md:flex-col md:items-end">
+                                                <div className="text-sm text-gray-400 md:mb-1">AI 종합 점수</div>
+                                                <div className={`text-4xl md:text-5xl font-black ${stock.score >= 70 ? 'text-green-400' : 'text-yellow-400'} drop-shadow-sm`}>{stock.score}</div>
+                                            </div>
+                                            <div className="w-full md:w-auto mt-2 md:mt-2 flex items-center justify-end gap-2">
                                                 {stock.symbol && (!stock.symbol.toUpperCase || !stock.symbol.toUpperCase().includes("MARKET")) && <WatchlistButton symbol={stock.symbol} />}
                                                 {stock.symbol && (!stock.symbol.toUpperCase || !stock.symbol.toUpperCase().includes("MARKET")) && (
                                                     <button
                                                         onClick={() => setShowAlertModal(true)}
                                                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white border border-white/20 transition-all"
                                                     >
-                                                        <Bell className="w-4 h-4" /> 알림
+                                                        <Bell className="w-4 h-4" />
+                                                        <span className="hidden sm:inline">알림</span>
                                                     </button>
                                                 )}
                                             </div>
@@ -913,7 +916,7 @@ function DiscoveryContent() {
                                                         className="group cursor-pointer flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-blue-500/30 transition-all"
                                                     >
                                                         <div className="flex-1 min-w-0 pr-3">
-                                                            <div className="font-bold text-white text-sm truncate group-hover:text-blue-300 transition-colors">
+                                                            <div className="font-bold text-white text-sm whitespace-normal break-words group-hover:text-blue-300 transition-colors">
                                                                 {item.name}
                                                             </div>
                                                             <div className="text-xs text-gray-500 font-mono mb-1">{item.symbol}</div>

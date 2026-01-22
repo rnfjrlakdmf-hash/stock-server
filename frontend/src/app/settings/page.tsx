@@ -14,12 +14,34 @@ export default function SettingsPage() {
     const [loadingConfig, setLoadingConfig] = useState(false);
     const [configError, setConfigError] = useState("");
 
+    // [New] Market Close Briefing State
+    const [isSummaryEnabled, setIsSummaryEnabled] = useState(false);
+
     useEffect(() => {
         const saved = localStorage.getItem("isPro");
         if (saved === "true") setIsPro(true);
 
         const savedTg = localStorage.getItem("telegramId");
         if (savedTg) setTelegramId(savedTg);
+
+        // Fetch Alert Status
+        const fetchAlertStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/alerts`);
+                const json = await res.json();
+                if (json.status === "success") {
+                    // Check if WATCHLIST_SUMMARY exists for "guest" (or current user logic if we had auth)
+                    // Since we don't have robust auth on frontend yet for this specific logic, we assume backend filtering works or we just check type.
+                    // Ideally we match user_id but local storage user might not match exactly if we use "guest".
+                    // Let's just check if ANY WATCHLIST_SUMMARY alert exists for now as a simple toggle state.
+                    const hasSummary = json.data.some((a: any) => a.type === "WATCHLIST_SUMMARY");
+                    setIsSummaryEnabled(hasSummary);
+                }
+            } catch (e) {
+                console.error("Failed to fetch alerts", e);
+            }
+        };
+        fetchAlertStatus();
     }, []);
 
     const findMyTelegramId = async () => {
@@ -41,6 +63,36 @@ export default function SettingsPage() {
             setConfigError("서버 연결 실패");
         } finally {
             setLoadingConfig(false);
+        }
+    };
+
+    const handleSummaryToggle = async () => {
+        if (!telegramId) {
+            alert("먼저 텔레그램 Chat ID를 설정해주세요.");
+            return;
+        }
+
+        const newState = !isSummaryEnabled;
+        setIsSummaryEnabled(newState);
+
+        try {
+            if (newState) {
+                // Subscribe
+                await fetch(`${API_BASE_URL}/api/alerts/summary`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: telegramId })
+                });
+            } else {
+                // Unsubscribe
+                await fetch(`${API_BASE_URL}/api/alerts/summary`, {
+                    method: "DELETE"
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            setIsSummaryEnabled(!newState); // Revert on error
+            alert("설정 변경에 실패했습니다.");
         }
     };
 
@@ -159,6 +211,24 @@ export default function SettingsPage() {
                             </button>
                         </div>
                         {configError && <p className="text-red-400 text-xs">{configError}</p>}
+
+                        {/* Summary Toggle */}
+                        {telegramId && (
+                            <div className="pt-4 border-t border-white/10 flex items-center justify-between">
+                                <div>
+                                    <h4 className="font-bold text-white mb-1">장 마감 브리핑 받기</h4>
+                                    <p className="text-xs text-gray-400">관심종목의 마감 시세를 매일 자동으로 받아봅니다. (15:40)</p>
+                                </div>
+                                <button
+                                    onClick={handleSummaryToggle}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isSummaryEnabled ? 'bg-green-500' : 'bg-gray-700'}`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isSummaryEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+                                    />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 

@@ -26,12 +26,13 @@ def save_alerts(alerts):
     with open(ALERTS_FILE, "w") as f:
         json.dump(alerts, f, indent=4)
 
-def add_alert(symbol, target_price=0, condition="above", alert_type="PRICE", chat_id=None):
+def add_alert(symbol, target_price=0, condition="above", alert_type="PRICE", chat_id=None, user_id="guest"):
     """
-    alert_type: PRICE, RSI_OVERSOLD, GOLDEN_CROSS, PRICE_DROP
+    alert_type: PRICE, RSI_OVERSOLD, GOLDEN_CROSS, PRICE_DROP, WATCHLIST_SUMMARY
     target_price: Required for PRICE type
     condition: Required for PRICE type
     chat_id: Telegram Chat ID
+    user_id: User who created the alert (for watchlist fetching)
     """
     alerts = load_alerts()
     alert = {
@@ -41,6 +42,7 @@ def add_alert(symbol, target_price=0, condition="above", alert_type="PRICE", cha
         "target_price": float(target_price) if target_price else 0,
         "condition": condition,
         "chat_id": chat_id,
+        "user_id": user_id,
         "created_at": datetime.now().isoformat(),
         "status": "active" 
     }
@@ -62,7 +64,11 @@ def calculate_technical_signals(symbol):
         price = ticker.fast_info.last_price
         
         # Fetch history for indicators
-        hist = ticker.history(period="3mo")
+        try:
+            hist = ticker.history(period="3mo")
+        except:
+            hist = pd.DataFrame()
+            
         if len(hist) < 20: 
             return None
             
@@ -110,9 +116,12 @@ def check_alerts():
         return []
 
     triggered = []
-    updated = False
+    
+    # [New] Daily Summary Check
+    updated = check_daily_summary(alerts, triggered)
     
     # Cache technical data to avoid re-fetching for same symbol multiple times
+
     tech_cache = {} 
     
     for alert in alerts:
@@ -229,6 +238,10 @@ def send_telegram_message(alert, current_price, extra_msg=""):
     elif alert["type"] == "PRICE_DROP":
         title = "📉 *급락 발생 경고*"
         body = f"🔻 *{symbol}* -3% 이상 급락!\n\n현재가: *{current_price}*\n{extra_msg}\n리스크 관리가 필요합니다."
+
+    elif alert["type"] == "WATCHLIST_SUMMARY":
+        title = "🏁 *장 마감 브리핑*"
+        body = f"{extra_msg}" # extra_msg contains the pre-formatted summary text
     
     else:
         title = "🔔 *알림*"
@@ -242,6 +255,71 @@ def send_telegram_message(alert, current_price, extra_msg=""):
         requests.post(url, data=data)
     except Exception as e:
         print(f"Telegram Error: {e}")
+
+def check_daily_summary(alerts, triggered_list):
+    """
+    Check if it's time to send daily market close summary (after 15:40 KST)
+    And strictly ensure it's sent only once per day.
+    """
+    now = datetime.now()
+    # KST Adjustment if server is UTC (Assuming server handles local time or we explicitly check hour)
+    # Simple check: 15:40 ~ 23:59
+    if now.hour < 15 or (now.hour == 15 and now.minute < 40):
+        return False
+        
+    summary_alerts = [a for a in alerts if a.get("type") == "WATCHLIST_SUMMARY" and a["status"] == "active"]
+    updated = False
+    
+    for alert in summary_alerts:
+        # Check if already sent today
+        last_triggered = alert.get("triggered_at")
+        if last_triggered:
+            last_date = datetime.fromisoformat(last_triggered).date()
+            if last_date == now.date():
+                continue # Already sent today
+        
+        # Trigger Summary
+        try:
+            from db_manager import get_watchlist
+            from stock_data import get_simple_quote
+            
+            # Assuming 'guest' for now as we don't have user mapping in alerts yet explicitly
+            # or we can assume single user usage for this standalone deployment.
+            # Ideally, we should store user_id in the alert. For now, let's pull 'guest' or 'rnfjr'
+            # But wait, db_manager stores by Google ID.
+            # If we don't know the Google ID here, we might need to pass it or just dump all watchlists?
+            # Let's fix this by making sure we know WHICH user this alert is for.
+            # For this quick impl, we can try to fetch watchlist for the user who created it?
+            # Does add_alert support user_id? No, but we can rely on the fact that for now we are adding it for the active user.
+            
+            # *Crucial Fix*: We need to know the User ID to fetch their watchlist.
+            # Let's assume for this specific user request 'rnfjr' or iterate common IDs if not stored.
+            # Better: When creating the alert, we should store 'user_id' in alerts.json.
+            # Fallback: Fetch watchlist for 'guest' if user_id missing.
+            
+            user_id = alert.get("user_id", "guest") 
+            watchlist = get_watchlist(user_id)
+            
+            if not watchlist:
+                continue
+
+            summary_lines = []
+            for sym in watchlist:
+                q = get_simple_quote(sym)
+                if q:
+                    # Formatting: SYMBOL: PRICE (CHANGE%)
+                    icon = "🔴" if q.get("change_percent", "").startswith("+") else "🔵"
+                    summary_lines.append(f"{icon} *{sym}*: {q.get('price')} ({q.get('change_percent')})")
+            
+            if summary_lines:
+                summary_text = "\n".join(summary_lines)
+                trigger_alert(alert, 0, triggered_list, summary_text)
+                updated = True
+                
+        except Exception as e:
+            print(f"Summary Generation Error: {e}")
+            
+    return updated
 
 def get_recent_telegram_users():
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"

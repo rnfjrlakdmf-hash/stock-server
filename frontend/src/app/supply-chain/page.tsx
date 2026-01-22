@@ -100,10 +100,10 @@ export default function SupplyChainPage() {
 
                         {/* Visualization Canvas (Simple CSS Node Graph) */}
                         {/* Visualization Canvas (Flex Column Layout) */}
-                        <div className="relative min-h-[600px] rounded-3xl border border-white/10 bg-black/40 backdrop-blur-xl overflow-hidden p-10 flex justify-between items-stretch gap-8">
+                        <div className="relative min-h-[600px] rounded-3xl border border-white/10 bg-black/40 backdrop-blur-xl overflow-hidden p-6 md:p-10 flex flex-col lg:flex-row justify-between items-center lg:items-stretch gap-8">
 
-                            {/* Decorative Lines (Background) */}
-                            <svg className="absolute inset-0 pointer-events-none opacity-20 z-0">
+                            {/* Decorative Lines (Background) - Desktop Only */}
+                            <svg className="hidden lg:block absolute inset-0 pointer-events-none opacity-20 z-0">
                                 <defs>
                                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
                                         <polygon points="0 0, 10 3.5, 0 7" fill="#fff" />
@@ -116,7 +116,7 @@ export default function SupplyChainPage() {
                             </svg>
 
                             {/* Left Column: Suppliers */}
-                            <div className="z-10 w-1/3 flex flex-col justify-center">
+                            <div className="z-10 w-full lg:w-1/3 flex flex-col justify-center">
                                 <div className="p-6 rounded-2xl border border-dashed border-green-500/30 bg-green-500/5 backdrop-blur-sm">
                                     <h3 className="text-green-400 font-bold mb-4 flex items-center gap-2">공급사 (원자재/부품) <ArrowRight className="w-4 h-4" /></h3>
                                     <div className="space-y-4">
@@ -124,7 +124,7 @@ export default function SupplyChainPage() {
                                             <div key={node.id} className="flex flex-col items-start gap-1 group">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>
-                                                    <span className="text-gray-300 group-hover:text-white transition-colors cursor-pointer">{node.label}</span>
+                                                    <span className="text-gray-300 group-hover:text-white transition-colors cursor-pointer text-lg md:text-base">{node.label}</span>
                                                     <span className="text-xs text-gray-500 hidden group-hover:inline-block animate-in fade-in">
                                                         - {data.links.find((l: any) => l.source === node.id)?.value}
                                                     </span>
@@ -145,9 +145,9 @@ export default function SupplyChainPage() {
                             </div>
 
                             {/* Center Column: Target */}
-                            <div className="z-20 flex-1 flex items-center justify-center">
-                                <div className="w-40 h-40 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-[0_0_60px_rgba(6,182,212,0.4)] border-4 border-white transform hover:scale-110 transition-transform cursor-pointer group relative">
-                                    <span className="text-2xl font-black text-white text-center px-2">{data.nodes.find((n: any) => n.group === 'target')?.label}</span>
+                            <div className="z-20 w-full lg:flex-1 flex items-center justify-center py-8 lg:py-0">
+                                <div className="w-40 h-40 md:w-56 md:h-56 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-[0_0_60px_rgba(6,182,212,0.4)] border-4 border-white transform hover:scale-110 transition-transform cursor-pointer group relative">
+                                    <span className="text-2xl md:text-3xl font-black text-white text-center px-2 break-keep">{data.nodes.find((n: any) => n.group === 'target')?.label}</span>
                                     <div className="absolute -bottom-12 opacity-0 group-hover:opacity-100 transition-opacity text-sm text-cyan-300 font-bold w-full text-center">Me</div>
 
                                     {/* Display Target Price too if exists */}
@@ -163,7 +163,7 @@ export default function SupplyChainPage() {
                             </div>
 
                             {/* Right Column: Competitors & Customers */}
-                            <div className="z-10 w-1/3 flex flex-col justify-between gap-6">
+                            <div className="z-10 w-full lg:w-1/3 flex flex-col justify-between gap-6">
                                 {/* Competitors (Top) */}
                                 <div className="p-6 rounded-2xl border border-dashed border-red-500/30 bg-red-500/5 backdrop-blur-sm">
                                     <h3 className="text-red-400 font-bold mb-4 flex items-center justify-end gap-2">경쟁사 (라이벌) <div className="w-2 h-2 rounded-full bg-red-500"></div></h3>
@@ -171,7 +171,7 @@ export default function SupplyChainPage() {
                                         {data.nodes.filter((n: any) => n.group === 'competitor').map((node: any) => (
                                             <div key={node.id} className="flex flex-col items-end gap-1 group">
                                                 <div className="flex items-center justify-end gap-3">
-                                                    <span className="text-gray-300 group-hover:text-white transition-colors cursor-pointer">{node.label}</span>
+                                                    <span className="text-gray-300 group-hover:text-white transition-colors cursor-pointer text-lg md:text-base">{node.label}</span>
                                                     <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
                                                 </div>
                                                 {/* Price Badge */}
@@ -198,7 +198,7 @@ export default function SupplyChainPage() {
                                                     <span className="text-xs text-gray-500 hidden group-hover:inline-block animate-in fade-in">
                                                         {data.links.find((l: any) => l.target === node.id)?.value} -
                                                     </span>
-                                                    <span className="text-gray-300 group-hover:text-white transition-colors cursor-pointer">{node.label}</span>
+                                                    <span className="text-gray-300 group-hover:text-white transition-colors cursor-pointer text-lg md:text-base">{node.label}</span>
                                                     <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
                                                 </div>
                                                 {/* Price Badge */}
@@ -216,8 +216,8 @@ export default function SupplyChainPage() {
                                 </div>
                             </div>
 
-                            {/* Decorative Connecting Lines (SVG) - Abstracted */}
-                            <svg className="absolute inset-0 pointer-events-none opacity-20">
+                            {/* Decorative Connecting Lines (SVG) - Abstracted - Desktop Only */}
+                            <svg className="hidden lg:block absolute inset-0 pointer-events-none opacity-20">
                                 <defs>
                                     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
                                         <polygon points="0 0, 10 3.5, 0 7" fill="#fff" />

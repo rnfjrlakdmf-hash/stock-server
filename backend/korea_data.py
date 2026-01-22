@@ -166,6 +166,7 @@ def search_korean_stock_symbol(keyword: str):
         
         normalized_keyword = keyword.replace(" ", "").upper()
         if normalized_keyword in MANUAL_STOCK_MAP:
+            print(f"[Search] Found '{keyword}' in MANUAL mapping.")
             return MANUAL_STOCK_MAP[normalized_keyword]
         
             if k in normalized_keyword:
@@ -173,6 +174,7 @@ def search_korean_stock_symbol(keyword: str):
 
         # [Dynamic Map Check]
         if normalized_keyword in DYNAMIC_STOCK_MAP:
+            print(f"[Search] Found '{keyword}' in DYNAMIC mapping (Exact match).")
             return DYNAMIC_STOCK_MAP[normalized_keyword]
             
         # Check partial match in Dynamic Map
@@ -181,11 +183,13 @@ def search_korean_stock_symbol(keyword: str):
             if len(normalized_keyword) >= 2 and normalized_keyword in name:
                  # Prefer exact start match
                  if name.startswith(normalized_keyword):
+                     print(f"[Search] Found '{keyword}' in DYNAMIC mapping (Partial match: {name}).")
                      return code
             # Also check if name is in keyword (e.g. "Samsung Electronics" -> "Samsung")
             # Usually keyword is shorter.
 
         # euc-kr Encoding for Naver Query
+        print(f"[Search] '{keyword}' not in cache. Crawling Naver Search...")
         from urllib.parse import quote
         encoded_query = quote(keyword.encode('euc-kr'))
         url = f"https://finance.naver.com/search/searchList.naver?query={encoded_query}"
@@ -224,6 +228,8 @@ def search_korean_stock_symbol(keyword: str):
                         # but just returning code allows stock_data to use its "Happy Eyeballs" check (Try KS then KQ)
                         # Or stock_data expects checks.
                         # We will return the 6 digit code.
+                        # We will return the 6 digit code.
+                        print(f"[Search] Naver Crawl Success for '{keyword}': {code}")
                         return code
                         
         return None

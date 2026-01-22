@@ -158,12 +158,7 @@ def read_alerts():
     """저장된 모든 알림 반환"""
     return {"status": "success", "data": get_alerts()}
 
-@app.post("/api/alerts")
-def create_alert(req: AlertRequest):
-    """새 알림 생성"""
-    # chat_id가 없으면 None으로 넘어감 -> alerts.py에서 처리
-    alert = add_alert(req.symbol, req.target_price, req.condition, req.chat_id)
-    return {"status": "success", "data": alert}
+
 
 @app.get("/api/theme/{keyword}")
 def read_theme(keyword: str):
@@ -592,16 +587,49 @@ def create_portfolio_diagnosis(req: DiagnosisRequest):
 
 
 
-class AlertRequest(BaseModel):
-    symbol: str
-    target_price: float
-    condition: str
-    chat_id: str = None
+class SummarySubscribeRequest(BaseModel):
+    chat_id: str
+
+@app.post("/api/alerts/summary")
+def subscribe_daily_summary(req: SummarySubscribeRequest, x_user_id: str = Header(None)):
+    """장 마감 브리핑 구독 (하루 1회 관심종목 시황 발송)"""
+    user_id = x_user_id if x_user_id else "guest"
+    
+    # 중복 체크
+    current_alerts = get_alerts()
+    for a in current_alerts:
+        if a.get("type") == "WATCHLIST_SUMMARY" and a.get("user_id") == user_id:
+             # 이미 존재하면 해당 알림 반환 (또는 업데이트)
+             a["chat_id"] = req.chat_id # Chat ID 업데이트
+             from alerts import save_alerts
+             save_alerts(current_alerts)
+             return {"status": "success", "message": "Updated existing subscription", "data": a}
+
+    # 신규 생성
+    alert = add_alert(symbol="WATCHLIST", alert_type="WATCHLIST_SUMMARY", chat_id=req.chat_id, user_id=user_id)
+    return {"status": "success", "data": alert}
+
+@app.delete("/api/alerts/summary")
+def unsubscribe_daily_summary(x_user_id: str = Header(None)):
+    """장 마감 브리핑 구독 취소"""
+    user_id = x_user_id if x_user_id else "guest"
+    current_alerts = get_alerts()
+    
+    # 해당 유저의 SUMMARY 알림 모두 삭제
+    to_delete = [a for a in current_alerts if a.get("type") == "WATCHLIST_SUMMARY" and a.get("user_id") == user_id]
+    
+    for a in to_delete:
+        delete_alert(a["id"])
+        
+    return {"status": "success", "deleted_count": len(to_delete)}
 
 @app.post("/api/alerts")
-def create_new_alert(req: AlertRequest):
+def create_new_alert(req: AlertRequest, x_user_id: str = Header(None)):
     """가격 알림 추가"""
-    alert = add_alert(req.symbol, req.target_price, req.condition, req.chat_id)
+    user_id = x_user_id if x_user_id else "guest"
+    # alert_type defaults to PRICE if not specified in AlertRequest (which currently lacks it, so existing logic holds)
+    # If we want to support other types via API, we should update AlertRequest, but for now this handles normal price alerts.
+    alert = add_alert(req.symbol, req.target_price, req.condition, chat_id=req.chat_id, user_id=user_id)
     return {"status": "success", "data": alert}
 
 @app.get("/api/alerts")
